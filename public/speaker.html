@@ -755,10 +755,20 @@
       openWS();
 
       const speechConfig = SpeechSDK.SpeechTranslationConfig.fromAuthorizationToken(authorizationToken, region);
+      // Auto language detection between English and French
+      let autoLangConfig = null;
+      try {
+        if (SpeechSDK && typeof SpeechSDK.AutoDetectSourceLanguageConfig !== 'undefined') {
+          autoLangConfig = SpeechSDK.AutoDetectSourceLanguageConfig.fromLanguages(['en-US','en-GB','fr-FR','fr-CA']);
+        }
+      } catch(_) {}
       if (window.__speechEndpointId && typeof speechConfig.setServiceProperty === 'function') {
         speechConfig.setServiceProperty('cid', window.__speechEndpointId, SpeechSDK.ServicePropertyChannel.UriQueryParameter);
       }
-      speechConfig.speechRecognitionLanguage = sourceLang.value;
+      // If auto-detect is enabled, we don't pin a single recognition language
+      if (!autoLangConfig) {
+        speechConfig.speechRecognitionLanguage = sourceLang.value;
+      }
       speechConfig.addTargetLanguage(targetLang.value);
       
       // Enhanced ASR configuration for better accuracy
@@ -804,7 +814,9 @@
         audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
       }
       
-      reco = new SpeechSDK.TranslationRecognizer(speechConfig, audioConfig);
+      reco = autoLangConfig
+        ? new SpeechSDK.TranslationRecognizer(speechConfig, autoLangConfig, audioConfig)
+        : new SpeechSDK.TranslationRecognizer(speechConfig, audioConfig);
 
       // EXPANDED Phrase hints, including conference phrase list (localized where available) + user custom phrases
       try {
