@@ -792,20 +792,11 @@
       let audioConfig;
       try {
         const deviceId = micSelect.value || undefined;
-        const constraints = {
-          audio: {
-            deviceId: deviceId ? { exact: deviceId } : undefined,
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            channelCount: 1,
-            sampleRate: 16000
-          }
-        };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        if (typeof SpeechSDK.AudioConfig.fromStreamInput === 'function') {
-          audioConfig = SpeechSDK.AudioConfig.fromStreamInput(stream);
-        } else if (deviceId && typeof SpeechSDK.AudioConfig.fromMicrophoneInput === 'function') {
+        // Ensure permission prompt happens before constructing AudioConfig
+        try {
+          await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (_) {}
+        if (deviceId && typeof SpeechSDK.AudioConfig.fromMicrophoneInput === 'function') {
           audioConfig = SpeechSDK.AudioConfig.fromMicrophoneInput(deviceId);
         } else {
           audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
