@@ -31,12 +31,19 @@
 
     // Serve static files from ../public so /listener.html works directly on :3001
     const publicDir = path.join(__dirname, '..', 'public');
-    app.use(express.static(publicDir));
 
-    // Convenience redirects
-    app.get(['/','/listener'], (req, res) => {
+    // Route root BEFORE static so we don't auto-serve public/index.html
+    app.get(['/', '/listener'], (req, res) => {
         res.sendFile(path.join(publicDir, 'listener.html'));
     });
+    app.get('/speaker', (req, res) => {
+        res.sendFile(path.join(publicDir, 'speaker.html'));
+    });
+    // Healthcheck
+    app.get('/healthz', (req, res) => res.status(200).send('ok'));
+
+    // Static after explicit routes
+    app.use(express.static(publicDir));
     
     // (Removed duplicate static setup and duplicate path import)
 
