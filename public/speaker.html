@@ -791,23 +791,21 @@
 
       let audioConfig;
       try {
-        const deviceId = micSelect.value || undefined;
         // Ensure permission prompt happens before constructing AudioConfig
-        try {
-          await navigator.mediaDevices.getUserMedia({ audio: true });
-        } catch (_) {}
-        if (deviceId && typeof SpeechSDK.AudioConfig.fromMicrophoneInput === 'function') {
-          audioConfig = SpeechSDK.AudioConfig.fromMicrophoneInput(deviceId);
-        } else {
-          audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
-        }
+        try { await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (_) {}
+        audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
       } catch (_) {
         audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
       }
       
-      reco = autoLangConfig
-        ? new SpeechSDK.TranslationRecognizer(speechConfig, autoLangConfig, audioConfig)
-        : new SpeechSDK.TranslationRecognizer(speechConfig, audioConfig);
+      try {
+        reco = (autoLangConfig && typeof SpeechSDK.TranslationRecognizer === 'function')
+          ? new SpeechSDK.TranslationRecognizer(speechConfig, autoLangConfig, audioConfig)
+          : new SpeechSDK.TranslationRecognizer(speechConfig, audioConfig);
+      } catch (err) {
+        console.log('[ASR] recognizer ctor failed, falling back to non-auto-detect:', err?.message || err);
+        reco = new SpeechSDK.TranslationRecognizer(speechConfig, audioConfig);
+      }
 
       // EXPANDED Phrase hints, including conference phrase list (localized where available) + user custom phrases
       try {
