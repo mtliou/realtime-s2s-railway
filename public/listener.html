@@ -734,7 +734,7 @@
       if (!text) return '';
       if (!toLang || (fromLangOrEmpty && fromLangOrEmpty.toLowerCase() === toLang.toLowerCase())) return text;
       try {
-        const resp = await fetch('http://localhost:3001/api/translate', {
+        const resp = await fetch('/api/translate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text, to: toLang })
@@ -754,7 +754,7 @@
       // If the input already matches the target language, allow as-is
       if (fromLangOrEmpty && fromLangOrEmpty.toLowerCase() === toLang.toLowerCase()) return text;
       try {
-        const resp = await fetch('http://localhost:3001/api/translate', {
+        const resp = await fetch('/api/translate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text, to: toLang })
@@ -1028,7 +1028,8 @@
       if (ws && ws.readyState === WebSocket.OPEN) return;
       
       console.log('[WS] Connecting...');
-      ws = new WebSocket('ws://localhost:3001/ws');
+      const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+      ws = new WebSocket(wsUrl);
       
       ws.onopen = () => {
         console.log('[WS] Connected');
@@ -1318,7 +1319,7 @@
     async function preloadKey() {
       try {
         console.log('[Init] Loading ElevenLabs API key...');
-        const res = await fetch('http://localhost:3001/api/get-eleven-key');
+        const res = await fetch('/api/get-eleven-key');
         if (res.ok) {
           const data = await res.json();
           if (data.apiKey) { 
