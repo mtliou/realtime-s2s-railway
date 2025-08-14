@@ -1,0 +1,3 @@
+[service]
+start = "npm start"
+build = "npm ci"

@@ -1,0 +1,1343 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Listener - Real-time Translation</title>
+  <style>
+    :root { --bg: #0b1220; --card: rgba(255,255,255,0.06); --border: rgba(255,255,255,0.12); --text: #e8eefc; --muted: #9fb0d3; --accent: #7aa2ff; --good: #2ecc71; --warn: #f1c40f; --bad: #e74c3c; }
+    * { box-sizing: border-box }
+    body {
+      margin: 0; padding: 0; color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial;
+      background: radial-gradient(1200px 800px at 90% 110%, #1a2b5a 0%, rgba(26,43,90,0) 60%),
+                  radial-gradient(1000px 700px at -10% 90%, #20345f 0%, rgba(32,52,95,0) 50%),
+                  var(--bg);
+      min-height: 100vh;
+    }
+    .shell { max-width: 1100px; margin: 0 auto; padding: 28px; }
+    .header { display:flex; align-items:center; justify-content:space-between; margin-bottom: 18px; }
+    .title { font-weight: 700; letter-spacing: .3px; font-size: 20px; }
+    .badges { display:flex; gap:10px; }
+    .badge { padding:6px 10px; border:1px solid var(--border); border-radius:999px; background: var(--card); color: var(--muted); font-size: 12px; }
+    .badge.ok { color: var(--good); border-color: rgba(46,204,113,0.35) }
+    .badge.warn { color: var(--warn); border-color: rgba(241,196,15,0.35) }
+    .badge.err { color: var(--bad); border-color: rgba(231,76,60,0.35) }
+    .card { border:1px solid var(--border); background: var(--card); border-radius: 14px; overflow: hidden; }
+    .controls { padding: 16px 18px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    button { 
+      padding: 7px 14px; 
+      border: 1px solid var(--border); 
+      background: rgba(255,255,255,0.04); 
+      color: var(--text); 
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    button:hover { background: rgba(255,255,255,0.08); border-color: var(--accent); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.primary { background: var(--accent); border-color: var(--accent); }
+    .feed { 
+      height: 500px; 
+      overflow-y: auto; 
+      background: rgba(0,0,0,0.3); 
+      border-top: 1px solid var(--border);
+      padding: 18px;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .feed::-webkit-scrollbar { width: 8px; }
+    .feed::-webkit-scrollbar-track { background: rgba(255,255,255,0.02); }
+    .feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    .feed::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+    .line { 
+      padding: 4px 0; 
+      border-bottom: 1px solid rgba(255,255,255,0.02);
+      animation: slideIn 0.3s ease-out;
+    }
+    .line.final { color: var(--text); }
+    .line.partial { color: var(--muted); }
+    .line.spoken { opacity: 0.6; }
+    h3 { margin:0 0 8px 0; padding: 16px 18px 0; font-size: 14px; color: var(--muted); font-weight:600; letter-spacing:.25px }
+    @keyframes slideIn {
+      from { transform: translateX(-10px); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    .error-display {
+      background: rgba(231, 76, 60, 0.1);
+      border: 1px solid rgba(231, 76, 60, 0.3);
+      padding: 12px;
+      margin: 12px 18px;
+      border-radius: 8px;
+      color: var(--bad);
+      font-size: 13px;
+      display: none;
+    }
+    .unlock-prompt {
+      background: rgba(122, 162, 255, 0.1);
+      border: 1px solid rgba(122, 162, 255, 0.3);
+      padding: 12px;
+      margin: 12px 18px;
+      border-radius: 8px;
+      color: var(--accent);
+      font-size: 13px;
+      display: none;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="header">
+      <div class="title" data-translate="Real-time Translation • Listener">Real-time Translation • Listener</div>
+      <div class="badges">
+        <div id="wsBadge" class="badge">WS: disconnected</div>
+        <div id="ttsBadge" class="badge">TTS: loading</div>
+        <div id="audioBadge" class="badge">Audio: locked</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="controls">
+        <button id="clearBtn" data-translate="Clear Feed">Clear Feed</button>
+        <button id="pauseBtn" data-translate="Pause TTS">Pause TTS</button>
+        <button id="testBtn" data-translate="Test TTS">Test TTS</button>
+        <button id="retryBtn" data-translate="Retry Connection">Retry Connection</button>
+        <label style="margin-left:8px" data-translate="Volume">Volume</label>
+        <input id="volumeSlider" type="range" min="0" max="200" value="100" style="width:140px" />
+        <label style="margin-left:8px" data-translate="Speed">Speed</label>
+        <select id="speedSelect" title="TTS speed (manual override)">
+          <option value="auto" selected>Auto</option>
+          <option value="0.75">0.75×</option>
+          <option value="1.00">1.0×</option>
+          <option value="1.25">1.25×</option>
+          <option value="1.50">1.5×</option>
+          <option value="2.00">2.0×</option>
+        </select>
+        <button id="unlockBtn" class="primary" style="display:none">Enable Audio</button>
+        <label style="margin-left:8px" data-translate="Translate to">Translate to</label>
+        <select id="translateSelect" style="min-width:200px"></select>
+        <label style="margin-left:8px" data-translate="Voice">Voice</label>
+        <select id="voiceSelect" style="min-width:220px"></select>
+        <button id="refreshVoices">↻</button>
+        <label style="margin-left:8px" data-translate="Output">Output</label>
+        <select id="outputSelect" style="min-width:220px"></select>
+        <button id="refreshOutputs">↻</button>
+      </div>
+      <div id="errorDisplay" class="error-display"></div>
+      <div id="unlockPrompt" class="unlock-prompt">👆 Click here or anywhere to enable audio playback</div>
+      <h3 data-translate="Incoming translations">Incoming translations</h3>
+      <div id="feed" class="feed"></div>
+    </div>
+  </div>
+
+  <script>
+    // Simple i18n for UI labels
+    const uiTranslations = {
+      'en': {
+        'Real-time Translation • Listener': 'Real-time Translation • Listener',
+        'WS: connected': 'WS: connected',
+        'WS: disconnected': 'WS: disconnected',
+        'WS: error': 'WS: error',
+        'TTS: ready': 'TTS: ready',
+        'TTS: synthesizing': 'TTS: synthesizing',
+        'TTS: playing': 'TTS: playing',
+        'TTS: error': 'TTS: error',
+        'Audio: unlocked': 'Audio: unlocked',
+        'Audio: locked': 'Audio: locked',
+        'Clear Feed': 'Clear Feed',
+        'Pause TTS': 'Pause TTS',
+        'Resume TTS': 'Resume TTS',
+        'Test TTS': 'Test TTS',
+        'Retry Connection': 'Retry Connection',
+        'Volume': 'Volume',
+        'Speed': 'Speed',
+        'Translate to': 'Translate to',
+        'Voice': 'Voice',
+        'Output': 'Output',
+        'Incoming translations': 'Incoming translations'
+      },
+      'fr': {
+        'Real-time Translation • Listener': 'Traduction en temps réel • Auditeur',
+        'WS: connected': 'WS : connecté',
+        'WS: disconnected': 'WS : déconnecté',
+        'WS: error': 'WS : erreur',
+        'TTS: ready': 'TTS : prêt',
+        'TTS: synthesizing': 'TTS : synthèse',
+        'TTS: playing': 'TTS : lecture',
+        'TTS: error': 'TTS : erreur',
+        'Audio: unlocked': 'Audio : débloqué',
+        'Audio: locked': 'Audio : bloqué',
+        'Clear Feed': 'Effacer',
+        'Pause TTS': 'Mettre en pause TTS',
+        'Resume TTS': 'Reprendre TTS',
+        'Test TTS': 'Tester TTS',
+        'Retry Connection': 'Réessayer la connexion',
+        'Volume': 'Volume',
+        'Speed': 'Vitesse',
+        'Translate to': 'Traduire en',
+        'Voice': 'Voix',
+        'Output': 'Sortie',
+        'Incoming translations': 'Traductions entrantes'
+      },
+      'es': {
+        'Real-time Translation • Listener': 'Traducción en tiempo real • Oyente',
+        'WS: connected': 'WS: conectado',
+        'WS: disconnected': 'WS: desconectado',
+        'WS: error': 'WS: error',
+        'TTS: ready': 'TTS: listo',
+        'TTS: synthesizing': 'TTS: sintetizando',
+        'TTS: playing': 'TTS: reproduciendo',
+        'TTS: error': 'TTS: error',
+        'Audio: unlocked': 'Audio: desbloqueado',
+        'Audio: locked': 'Audio: bloqueado',
+        'Clear Feed': 'Limpiar',
+        'Pause TTS': 'Pausar TTS',
+        'Resume TTS': 'Reanudar TTS',
+        'Test TTS': 'Probar TTS',
+        'Retry Connection': 'Reintentar conexión',
+        'Volume': 'Volumen',
+        'Speed': 'Velocidad',
+        'Translate to': 'Traducir a',
+        'Voice': 'Voz',
+        'Output': 'Salida',
+        'Incoming translations': 'Traducciones entrantes'
+      }
+    };
+    function langKeyFromNavigator() {
+      const nav = (navigator.language || navigator.userLanguage || 'en').toLowerCase();
+      if (nav.startsWith('fr')) return 'fr';
+      if (nav.startsWith('es')) return 'es';
+      return 'en';
+    }
+    function applyUITranslations() {
+      const k = langKeyFromNavigator();
+      const dict = uiTranslations[k] || uiTranslations.en;
+      document.querySelectorAll('[data-translate]').forEach(el => {
+        const key = el.getAttribute('data-translate');
+        if (dict[key]) el.textContent = dict[key];
+      });
+    }
+    document.addEventListener('DOMContentLoaded', applyUITranslations);
+    const feed = document.getElementById('feed');
+    const clearBtn = document.getElementById('clearBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const testBtn = document.getElementById('testBtn');
+    const retryBtn = document.getElementById('retryBtn');
+    const unlockBtn = document.getElementById('unlockBtn');
+    const volumeSlider = document.getElementById('volumeSlider');
+    const wsBadge = document.getElementById('wsBadge');
+    const ttsBadge = document.getElementById('ttsBadge');
+    const audioBadge = document.getElementById('audioBadge');
+    const errorDisplay = document.getElementById('errorDisplay');
+    const unlockPrompt = document.getElementById('unlockPrompt');
+    const outputSelect = document.getElementById('outputSelect');
+    const refreshOutputs = document.getElementById('refreshOutputs');
+    const translateSelect = document.getElementById('translateSelect');
+    const voiceSelect = document.getElementById('voiceSelect');
+    const refreshVoices = document.getElementById('refreshVoices');
+    const speedSelect = document.getElementById('speedSelect');
+    
+    let ws = null;
+    let isTtsPlaying = false;
+    let ttsPaused = false;
+    let currentAudio = null;
+    let currentSource = null;
+    const ttsQueue = [];
+    let voicesCache = null;
+    const langVoiceCache = {};
+    let audioUnlocked = false;
+    let audioContext = null;
+    let elevenApiKey = '';
+    let lineCounter = 0;
+    let lastError = null;
+    let retryQueue = [];
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    let sinkElement = null; // audio element used for routing output
+    let sinkDeviceId = localStorage.getItem('ttsSinkDeviceId') || '';
+    
+    // State management
+    const state = {
+      currentText: '',
+      lastSpokenEnd: 0,
+      segmentId: 0,
+      recentChunks: new Set(),
+      lastUpdateAt: 0
+    };
+    let partialLineDiv = null; // rolling partial line
+    let queueEstimatedSeconds = 0; // estimated remaining audio seconds in queue
+    function estimateDurationSeconds(text) {
+      const words = (text || '').trim().split(/\s+/).filter(Boolean).length;
+      const wordsPerSecond = 2.6;
+      return words / wordsPerSecond;
+    }
+    let manualRate = localStorage.getItem('listener.ttsRate') || 'auto';
+    if (speedSelect) speedSelect.value = manualRate;
+    function getEffectiveRate(backlogSeconds) {
+      if (manualRate && manualRate !== 'auto') return Math.max(0.5, Math.min(2.5, Number(manualRate)));
+      const threshold = 1.5; // start accelerating past this
+      const maxBoost = 0.25; // up to +25%
+      const scale = 8.0;     // how quickly to speed up with backlog
+      let rate = 1.0;
+      if (backlogSeconds > threshold) {
+        rate = 1.0 + Math.min(maxBoost, (backlogSeconds - threshold) / scale);
+      }
+      return rate;
+    }
+    let selectedTranslateLang = localStorage.getItem('listener.translateLang') || 'fr-FR';
+    let selectedTtsLang = selectedTranslateLang; // always synced with translate
+    function voiceStorageKey(lang) { return `listener.voiceId.${(lang||'').toLowerCase()}`; }
+    let selectedVoiceId = localStorage.getItem(voiceStorageKey(selectedTranslateLang)) || '';
+
+    function showError(msg) {
+      lastError = msg;
+      errorDisplay.textContent = msg;
+      errorDisplay.style.display = 'block';
+      console.error(`[Error] ${msg}`);
+      setTimeout(() => {
+        if (lastError === msg) {
+          errorDisplay.style.display = 'none';
+        }
+      }, 10000);
+    }
+
+    function clearFeed() {
+      feed.innerHTML = '';
+      state.currentText = '';
+      state.lastSpokenEnd = 0;
+      state.recentChunks.clear();
+      lineCounter = 0;
+      state.lastUpdateAt = 0;
+    }
+
+    clearBtn.onclick = clearFeed;
+    
+    pauseBtn.onclick = () => {
+      ttsPaused = !ttsPaused;
+      pauseBtn.textContent = ttsPaused ? 'Resume TTS' : 'Pause TTS';
+      if (!ttsPaused && !isTtsPlaying) playNext();
+    };
+
+    testBtn.onclick = async () => {
+      // First ensure audio is unlocked
+      if (!audioUnlocked) {
+        console.log('[Test] Unlocking audio first...');
+        await unlockAudioFull();
+      }
+      
+      // Test with a beep first
+      console.log('[Test] Playing test beep...');
+      const ctx = audioContext || new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      
+      oscillator.frequency.value = 440; // A4 note
+      gainNode.gain.value = 0.3;
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      
+      oscillator.start();
+      oscillator.stop(ctx.currentTime + 0.5); // Play for 0.5 seconds
+      
+      // Then test TTS
+      setTimeout(() => {
+        const testText = "This is a test of the text to speech system. Can you hear me clearly?";
+        console.log('[Test] Starting TTS test with text:', testText);
+        enqueue({ text: testText, lang: 'en-US' });
+      }, 600);
+    };
+
+    unlockBtn.onclick = async () => {
+      await unlockAudioFull();
+    };
+
+    volumeSlider.oninput = () => {
+      const vol = Number(volumeSlider.value) / 100;
+      if (currentAudio) currentAudio.volume = Math.max(0, Math.min(1, vol));
+    };
+
+    retryBtn.onclick = () => {
+      console.log('[Retry] Reconnecting...');
+      if (ws) {
+        ws.close();
+      }
+      setTimeout(connectWS, 100);
+      preloadKey();
+    };
+
+    async function enumerateOutputs() {
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const outputs = devices.filter(d => d.kind === 'audiooutput');
+        while (outputSelect.firstChild) outputSelect.removeChild(outputSelect.firstChild);
+        const def = document.createElement('option');
+        def.value = '';
+        def.textContent = 'System default output';
+        outputSelect.appendChild(def);
+        outputs.forEach(d => {
+          const opt = document.createElement('option');
+          opt.value = d.deviceId;
+          opt.textContent = d.label || `Output ${outputSelect.children.length}`;
+          outputSelect.appendChild(opt);
+        });
+        const found = Array.from(outputSelect.options).some(o => o.value === sinkDeviceId);
+        outputSelect.value = found ? sinkDeviceId : '';
+      } catch(e) {
+        console.warn('enumerateOutputs failed', e);
+      }
+    }
+
+    refreshOutputs.onclick = enumerateOutputs;
+    outputSelect.onchange = async () => {
+      sinkDeviceId = outputSelect.value || '';
+      localStorage.setItem('ttsSinkDeviceId', sinkDeviceId);
+      await applySink();
+    };
+
+    async function ensureSinkElement() {
+      if (sinkElement) return sinkElement;
+      sinkElement = document.createElement('audio');
+      sinkElement.autoplay = true;
+      sinkElement.playsInline = true;
+      sinkElement.muted = false;
+      sinkElement.style.display = 'none';
+      document.body.appendChild(sinkElement);
+      return sinkElement;
+    }
+
+    async function applySink() {
+      try {
+        await ensureSinkElement();
+        if (typeof sinkElement.setSinkId === 'function') {
+          await sinkElement.setSinkId(sinkDeviceId || 'default');
+          console.log(`[Audio] Output routed to device: ${sinkDeviceId || 'default'}`);
+        } else {
+          console.log('[Audio] setSinkId not supported in this browser');
+        }
+      } catch (e) {
+        console.warn('applySink failed', e);
+      }
+    }
+
+    function appendLine(text, isFinal, lang) {
+      const div = document.createElement('div');
+      div.className = `line ${isFinal ? 'final' : 'partial'}`;
+      const label = isFinal ? '✓' : '~';
+      lineCounter++;
+      div.textContent = `[${lineCounter}] ${label} ${lang}: ${text}`;
+      div.dataset.lineId = lineCounter;
+      feed.appendChild(div);
+      feed.scrollTop = feed.scrollHeight;
+      return div;
+    }
+
+    function updatePartialLine(lang, text) {
+      const display = text.trim();
+      if (!partialLineDiv) {
+        partialLineDiv = appendLine(display, false, lang);
+      } else {
+        partialLineDiv.textContent = `[${partialLineDiv.dataset.lineId}] ~ ${lang}: ${display}`;
+      }
+    }
+
+    async function fetchVoices(apiKey) {
+      if (voicesCache) return voicesCache;
+      try {
+        const res = await fetch('https://api.elevenlabs.io/v1/voices', { 
+          headers: { 'xi-api-key': apiKey } 
+        });
+        if (!res.ok) {
+          const errText = await res.text();
+          showError(`ElevenLabs API error ${res.status}: ${errText}`);
+          return null;
+        }
+        voicesCache = await res.json();
+        return voicesCache;
+      } catch(e) {
+        showError(`Failed to fetch voices: ${e.message}`);
+      }
+      return null;
+    }
+
+    // Wrapper used by preload to populate based on current target language
+    async function populateVoiceSelect() {
+      try {
+        // Show loading placeholder
+        while (voiceSelect.firstChild) voiceSelect.removeChild(voiceSelect.firstChild);
+        const loading = document.createElement('option');
+        loading.value = '';
+        loading.textContent = 'Loading voices...';
+        voiceSelect.appendChild(loading);
+        // Re-fetch voices list to avoid stale cache after reload or language switch
+        voicesCache = null;
+        await populateVoiceSelectForLanguage(selectedTranslateLang);
+      } catch (_) {
+        // On error, at least leave a helpful placeholder
+        while (voiceSelect.firstChild) voiceSelect.removeChild(voiceSelect.firstChild);
+        const none = document.createElement('option');
+        none.value = '';
+        none.textContent = 'No voices available';
+        voiceSelect.appendChild(none);
+      }
+    }
+
+    function languageToken(langCode) { return guessLangFromCode(langCode); }
+
+    function filterVoicesForLanguage(data, langCode) {
+      if (!data || !Array.isArray(data.voices)) return [];
+      const longToken = (languageToken(langCode) || '').toLowerCase(); // e.g. 'spanish'
+      const shortCode = (langCode || '').toLowerCase().split('-')[0];   // e.g. 'es'
+      const tokens = Array.from(new Set([longToken, shortCode].filter(Boolean)));
+      if (tokens.length === 0) return data.voices.slice();
+      const voices = data.voices.filter(v => {
+        const lbl = v.labels || {};
+        const haystack = (
+          (v.name || '') + ' ' +
+          (v.description || '') + ' ' +
+          Object.values(lbl).join(' ') + ' ' +
+          JSON.stringify(v.languages || v.supported_languages || v.category || '')
+        ).toLowerCase();
+        return tokens.some(tk => haystack.includes(tk));
+      });
+      return voices;
+    }
+
+    // Curated preferred male/native voice name hints per language
+    const curatedPreferredByLang = {
+      es: [/alejandro|jorge|carlos|sergio|miguel|antonio|manuel|francisco/i],
+      fr: [/antoine|gabriel|louis|adrien|theo|théo|nicolas|pierre/i],
+      de: [/sebastian|jan|lukas|felix|paul|jonas/i],
+      it: [/giorgio|luca|marco|andrea|matteo/i],
+      pt: [/jo[aã]o|miguel|thiago|tiago|pedro/i],
+      ru: [/ivan|alexei|aleksei|sergey|dmitri|andrei/i],
+      pl: [/jakub|piotr|mateusz|kamil/i],
+      nl: [/bart|thomas|jeroen|pieter/i],
+      sv: [/erik|johan|lars|karl/i],
+      nb: [/ole|henrik|lars|anders/i],
+      da: [/mikkel|lars|morten|rasmus/i],
+      fi: [/mikko|juha|antti|jani/i],
+      tr: [/mehmet|ahmet|mustafa|ali/i],
+      el: [/giannis|giorgos|nikos/i],
+      he: [/dan|avi|erez|amir/i],
+      ar: [/omar|ahmed|mohamed|khaled|youssef/i],
+      hi: [/rahul|arjun|rohit|aman/i],
+      bn: [/shuvo|ashik|shawon/i],
+      ta: [/arun|vijay|sathish/i],
+      te: [/mahesh|sai|ravi/i],
+      ja: [/taro|ichiro|hiroshi|daichi/i],
+      ko: [/minsu|jisoo|hyun|seojun/i],
+      zh: [/li|wang|zhang|chen|liu/i],
+      vi: [/nam|minh|anh/i],
+      id: [/agus|andi|budi/i]
+    };
+
+    function scoreVoicesForLanguage(data, langCode) {
+      const shortCode = (langCode || '').toLowerCase().split('-')[0];
+      const longToken = (languageToken(langCode) || '').toLowerCase();
+      const preferredRegexes = curatedPreferredByLang[shortCode] || [];
+      const list = (data && Array.isArray(data.voices)) ? data.voices.slice() : [];
+      return list.map(v => {
+        const lbl = v.labels || {};
+        const haystack = (
+          (v.name || '') + ' ' +
+          (v.description || '') + ' ' +
+          Object.values(lbl).join(' ') + ' ' +
+          JSON.stringify(v.languages || v.supported_languages || v.category || '')
+        ).toLowerCase();
+        let score = 0;
+        if (longToken && haystack.includes(longToken)) score += 3;
+        if (shortCode && haystack.includes(shortCode)) score += 2;
+        if (String(lbl.gender || '').toLowerCase() === 'male') score += 1;
+        if (String(v.category || '').toLowerCase().includes('professional')) score += 1;
+        if (preferredRegexes.some(rx => rx.test(v.name || '') || rx.test(v.description || ''))) score += 4;
+        return { v, score };
+      }).sort((a, b) => b.score - a.score).map(x => x.v);
+    }
+
+    function pickDefaultMaleVoice(voices) {
+      if (!voices || voices.length === 0) return '';
+      // Prefer explicit gender label
+      const maleLabel = voices.find(v => (v.labels && String(v.labels.gender||'').toLowerCase() === 'male'));
+      if (maleLabel) return maleLabel.voice_id;
+      // Try name/description hints
+      const maleHint = voices.find(v => /\b(male|man|guy|m)\b/i.test(`${v.name||''} ${v.description||''}`));
+      if (maleHint) return maleHint.voice_id;
+      // Fallback to first filtered voice
+      return voices[0].voice_id;
+    }
+
+    async function populateVoiceSelectForLanguage(langCode) {
+      try {
+        if (!elevenApiKey) return;
+        // Always attempt to refresh voice list to avoid cached empties
+        voicesCache = null;
+        const data = await fetchVoices(elevenApiKey);
+        if (!data || !Array.isArray(data.voices)) return;
+        let filtered = filterVoicesForLanguage(data, langCode);
+        while (voiceSelect.firstChild) voiceSelect.removeChild(voiceSelect.firstChild);
+        // If filtering is too strict, use scored ranking over full set
+        let list = filtered.length ? filtered : scoreVoicesForLanguage(data, langCode);
+        list = list.slice(0, 12);
+        if (list.length === 0) {
+          // Fallback: show a generic curated top set if filtering finds none
+          list = data.voices.slice(0, 12);
+        }
+        list.forEach(v => {
+          const opt = document.createElement('option');
+          opt.value = v.voice_id;
+          const gender = (v.labels && v.labels.gender) ? ` • ${v.labels.gender}` : '';
+          const langHint = (v.labels && (v.labels.language || v.labels.accent)) ? ` • ${(v.labels.language || v.labels.accent)}` : '';
+          const label = (v.name || v.voice_id) + gender + langHint;
+          opt.textContent = label;
+          voiceSelect.appendChild(opt);
+        });
+        // Load previous selection for this language or pick a male default
+        const stored = localStorage.getItem(voiceStorageKey(langCode)) || '';
+        const foundStored = stored && Array.from(voiceSelect.options).some(o => o.value === stored);
+        if (foundStored) {
+          voiceSelect.value = stored;
+          selectedVoiceId = stored;
+        } else {
+          const def = pickDefaultMaleVoice(list);
+          voiceSelect.value = def || (list[0]?.voice_id || '');
+          selectedVoiceId = voiceSelect.value;
+          localStorage.setItem(voiceStorageKey(langCode), selectedVoiceId);
+        }
+        console.log(`[Voices] Loaded ${list.length} voices for ${langCode}. Default voice: ${selectedVoiceId}`);
+      } catch (_) {}
+    }
+
+    function guessLangFromCode(lang) {
+      const lc = (lang || '').toLowerCase();
+      if (lc.startsWith('en')) return 'english';
+      if (lc.startsWith('fr')) return 'french';
+      if (lc.startsWith('es')) return 'spanish';
+      if (lc.startsWith('de')) return 'german';
+      if (lc.startsWith('it')) return 'italian';
+      if (lc.startsWith('pt')) return 'portuguese';
+      if (lc.startsWith('nl')) return 'dutch';
+      if (lc.startsWith('sv')) return 'swedish';
+      if (lc.startsWith('nb') || lc.startsWith('no')) return 'norwegian';
+      if (lc.startsWith('da')) return 'danish';
+      if (lc.startsWith('fi')) return 'finnish';
+      if (lc.startsWith('pl')) return 'polish';
+      if (lc.startsWith('ru')) return 'russian';
+      if (lc.startsWith('uk')) return 'ukrainian';
+      if (lc.startsWith('cs')) return 'czech';
+      if (lc.startsWith('sk')) return 'slovak';
+      if (lc.startsWith('ro')) return 'romanian';
+      if (lc.startsWith('hu')) return 'hungarian';
+      if (lc.startsWith('el')) return 'greek';
+      if (lc.startsWith('tr')) return 'turkish';
+      if (lc.startsWith('he')) return 'hebrew';
+      if (lc.startsWith('ar')) return 'arabic';
+      if (lc.startsWith('fa')) return 'persian';
+      if (lc.startsWith('hi')) return 'hindi';
+      if (lc.startsWith('bn')) return 'bengali';
+      if (lc.startsWith('ta')) return 'tamil';
+      if (lc.startsWith('te')) return 'telugu';
+      if (lc.startsWith('th')) return 'thai';
+      if (lc.startsWith('vi')) return 'vietnamese';
+      if (lc.startsWith('id')) return 'indonesian';
+      if (lc.startsWith('ms')) return 'malay';
+      if (lc.startsWith('zh')) return 'chinese';
+      if (lc.startsWith('ja')) return 'japanese';
+      if (lc.startsWith('ko')) return 'korean';
+      return '';
+    }
+
+    const languageOptions = [
+      { code: 'en-US', label: 'English (US)' },
+      { code: 'en-GB', label: 'English (UK)' },
+      { code: 'en-AU', label: 'English (AU)' },
+      { code: 'en-IN', label: 'English (IN)' },
+      { code: 'fr-FR', label: 'French (FR)' },
+      { code: 'fr-CA', label: 'French (CA)' },
+      { code: 'es-ES', label: 'Spanish (ES)' },
+      { code: 'es-MX', label: 'Spanish (MX)' },
+      { code: 'de-DE', label: 'German' },
+      { code: 'it-IT', label: 'Italian' },
+      { code: 'pt-PT', label: 'Portuguese (PT)' },
+      { code: 'pt-BR', label: 'Portuguese (BR)' },
+      { code: 'nl-NL', label: 'Dutch' },
+      { code: 'sv-SE', label: 'Swedish' },
+      { code: 'nb-NO', label: 'Norwegian' },
+      { code: 'da-DK', label: 'Danish' },
+      { code: 'fi-FI', label: 'Finnish' },
+      { code: 'pl-PL', label: 'Polish' },
+      { code: 'ru-RU', label: 'Russian' },
+      { code: 'uk-UA', label: 'Ukrainian' },
+      { code: 'cs-CZ', label: 'Czech' },
+      { code: 'sk-SK', label: 'Slovak' },
+      { code: 'ro-RO', label: 'Romanian' },
+      { code: 'hu-HU', label: 'Hungarian' },
+      { code: 'el-GR', label: 'Greek' },
+      { code: 'tr-TR', label: 'Turkish' },
+      { code: 'he-IL', label: 'Hebrew' },
+      { code: 'ar-SA', label: 'Arabic (SA)' },
+      { code: 'ar-EG', label: 'Arabic (EG)' },
+      { code: 'fa-IR', label: 'Persian' },
+      { code: 'hi-IN', label: 'Hindi' },
+      { code: 'bn-IN', label: 'Bengali' },
+      { code: 'ta-IN', label: 'Tamil' },
+      { code: 'te-IN', label: 'Telugu' },
+      { code: 'th-TH', label: 'Thai' },
+      { code: 'vi-VN', label: 'Vietnamese' },
+      { code: 'id-ID', label: 'Indonesian' },
+      { code: 'ms-MY', label: 'Malay' },
+      { code: 'zh-CN', label: 'Chinese (CN)' },
+      { code: 'zh-TW', label: 'Chinese (TW)' },
+      { code: 'zh-HK', label: 'Chinese (HK)' },
+      { code: 'ja-JP', label: 'Japanese' },
+      { code: 'ko-KR', label: 'Korean' }
+    ];
+
+    function populateLangSelect(selectEl, selected) {
+      if (!selectEl) return;
+      while (selectEl.firstChild) selectEl.removeChild(selectEl.firstChild);
+      languageOptions.forEach(opt => {
+        const o = document.createElement('option');
+        o.value = opt.code;
+        o.textContent = `${opt.label}`;
+        selectEl.appendChild(o);
+      });
+      const found = Array.from(selectEl.options).some(o => o.value === selected);
+      selectEl.value = found ? selected : languageOptions[0].code;
+    }
+    populateLangSelect(translateSelect, selectedTranslateLang);
+    translateSelect.onchange = () => {
+      selectedTranslateLang = translateSelect.value;
+      localStorage.setItem('listener.translateLang', selectedTranslateLang);
+      // keep TTS language in lockstep
+      selectedTtsLang = selectedTranslateLang;
+      // refresh voices to show only those for the new language
+      populateVoiceSelectForLanguage(selectedTranslateLang);
+      // load stored selection for this language (populateVoiceSelectForLanguage handles it)
+    };
+    voiceSelect.onchange = () => {
+      selectedVoiceId = voiceSelect.value || '';
+      localStorage.setItem(voiceStorageKey(selectedTranslateLang), selectedVoiceId);
+    };
+    refreshVoices.onclick = () => populateVoiceSelectForLanguage(selectedTranslateLang);
+    if (speedSelect) {
+      speedSelect.onchange = () => {
+        manualRate = speedSelect.value;
+        localStorage.setItem('listener.ttsRate', manualRate);
+        console.log(`[TTS] 🔧 Manual rate set to ${manualRate}`);
+      };
+    }
+
+    async function translateTextIfNeeded(text, fromLangOrEmpty, toLang) {
+      if (!text) return '';
+      if (!toLang || (fromLangOrEmpty && fromLangOrEmpty.toLowerCase() === toLang.toLowerCase())) return text;
+      try {
+        const resp = await fetch('http://localhost:3001/api/translate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, to: toLang })
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          return data.translation || text;
+        }
+      } catch (_) {}
+      return text;
+    }
+
+    // Strict translation for TTS: never fallback to source text on failure
+    async function translateTextStrict(text, fromLangOrEmpty, toLang) {
+      if (!text) return null;
+      if (!toLang) return null;
+      // If the input already matches the target language, allow as-is
+      if (fromLangOrEmpty && fromLangOrEmpty.toLowerCase() === toLang.toLowerCase()) return text;
+      try {
+        const resp = await fetch('http://localhost:3001/api/translate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, to: toLang })
+        });
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        if (!data || typeof data.translation !== 'string' || !data.translation.trim()) return null;
+        return data.translation;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    // Retry helper: translates and enqueues only when translation succeeds
+    function enqueueTranslatedOrRetry(rawText, incomingLang, ttsLang, lineDiv, attempt = 0) {
+      const maxAttempts = 3;
+      translateTextStrict(rawText, incomingLang, ttsLang).then(t => {
+        if (t) {
+          enqueue({ text: t, lang: ttsLang, lineDiv });
+        } else if (attempt < maxAttempts) {
+          const backoffMs = 500 + attempt * 400;
+          console.log(`[TTS] ⏳ Translation unavailable (attempt ${attempt + 1}/${maxAttempts}). Retrying in ${backoffMs}ms...`);
+          setTimeout(() => enqueueTranslatedOrRetry(rawText, incomingLang, ttsLang, lineDiv, attempt + 1), backoffMs);
+        } else {
+          console.warn('[TTS] 🚫 Dropping chunk after failed translation attempts');
+        }
+      });
+    }
+
+    async function resolveVoiceForLanguage(lang, apiKey) {
+      if (langVoiceCache[lang]) return langVoiceCache[lang];
+      const voices = await fetchVoices(apiKey);
+      const needle = guessLangFromCode(lang);
+      let chosen = null;
+      if (voices && Array.isArray(voices.voices)) {
+        chosen = voices.voices.find(v => v.labels && (v.labels.language === needle || v.labels.accent === needle));
+        if (!chosen) chosen = voices.voices.find(v => (v.name || '').toLowerCase().includes(needle) || (v.description || '').toLowerCase().includes(needle));
+        if (!chosen && needle === 'english') {
+          langVoiceCache[lang] = '21m00Tcm4TlvDq8ikWAM';
+          return langVoiceCache[lang];
+        }
+        if (!chosen && voices.voices.length) chosen = voices.voices[0];
+      }
+      if (chosen && chosen.voice_id) {
+        langVoiceCache[lang] = chosen.voice_id;
+        return chosen.voice_id;
+      }
+      langVoiceCache[lang] = '21m00Tcm4TlvDq8ikWAM';
+      return langVoiceCache[lang];
+    }
+
+    async function speakWithElevenLabs(item) {
+      const { text, lang, lineDiv } = item;
+      const ttsStartTime = Date.now();
+      console.log(`[TTS] 🎯 Starting synthesis at ${new Date().toISOString()}`);
+      console.log(`[TTS] 📝 Text to speak: "${text}"`);
+      console.log(`[TTS] 🌍 Language: ${lang}`);
+      console.log(`[TTS] 📏 Text length: ${text.length} chars`);
+      console.log(`[TTS] 🎬 Queue size: ${ttsQueue.length} items remaining`);
+      
+      try {
+        ttsBadge.className = 'badge warn';
+        ttsBadge.textContent = 'TTS: synthesizing';
+        
+        const apiKey = elevenApiKey;
+        if (!apiKey) { 
+          showError('No ElevenLabs API key');
+          ttsBadge.className = 'badge err'; 
+          ttsBadge.textContent = 'TTS: no key'; 
+          isTtsPlaying = false; 
+          playNext(); 
+          return; 
+        }
+        
+        let vId = selectedVoiceId || await resolveVoiceForLanguage(lang || 'en', apiKey);
+        const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(vId)}`;
+        const body = { 
+          text, 
+          model_id: 'eleven_turbo_v2_5',
+          voice_settings: { 
+            stability: 0.5, 
+            similarity_boost: 0.75,
+            style: 0.5,
+            use_speaker_boost: true
+          },
+          optimize_streaming_latency: 4
+        };
+        
+        console.log(`[TTS] 🚀 Sending request to ElevenLabs`);
+        console.log(`[TTS] 🎯 Voice ID: ${vId}`);
+        console.log(`[TTS] ⚙️ Model: eleven_turbo_v2_5`);
+        console.log(`[TTS] ⚡ Optimization level: 4 (lowest latency)`);
+        const synthStartTime = Date.now();
+        const res = await fetch(url, { 
+          method: 'POST', 
+          headers: { 
+            'xi-api-key': apiKey, 
+            'Content-Type': 'application/json', 
+            'Accept': 'audio/mpeg' 
+          }, 
+          body: JSON.stringify(body) 
+        });
+        
+        if (!res.ok) { 
+          const errText = await res.text();
+          showError(`TTS API error ${res.status}: ${errText}`);
+          console.error(`[TTS] Full error response:`, errText);
+          ttsBadge.className = 'badge err'; 
+          ttsBadge.textContent = 'TTS: API error'; 
+          isTtsPlaying = false; 
+          playNext(); 
+          return; 
+        }
+        
+        const arrayBuf = await res.arrayBuffer();
+        const synthEndTime = Date.now();
+        const synthDuration = synthEndTime - synthStartTime;
+        console.log(`[TTS] ✅ Received audio: ${arrayBuf.byteLength} bytes`);
+        console.log(`[TTS] ⏱️ Synthesis time: ${synthDuration}ms`);
+        console.log(`[TTS] 📊 Bytes per char: ${Math.round(arrayBuf.byteLength / text.length)}`);
+        
+        // Always use Web Audio API for Safari
+        if (!audioUnlocked) {
+          console.log('[TTS] Audio not unlocked, attempting unlock...');
+          await unlockAudioFull();
+          if (!audioUnlocked) {
+            console.log('[TTS] Failed to unlock audio, queueing for retry');
+            retryQueue.push(item);
+            ttsBadge.className = 'badge warn';
+            ttsBadge.textContent = 'TTS: needs unlock';
+            isTtsPlaying = false;
+            unlockBtn.style.display = 'block';
+            unlockPrompt.style.display = 'block';
+            return;
+          }
+        }
+        
+        // Use Web Audio API
+        try {
+          const decoded = await audioContext.decodeAudioData(arrayBuf.slice(0));
+          
+          currentSource = audioContext.createBufferSource();
+          currentSource.buffer = decoded;
+          // Backlog-aware playback rate
+          const actualSeconds = decoded.duration;
+          if (typeof item.estimatedSeconds === 'number') {
+            queueEstimatedSeconds += Math.max(0, actualSeconds - item.estimatedSeconds);
+          }
+          const backlogSeconds = Math.max(0, queueEstimatedSeconds);
+          const rate = getEffectiveRate(backlogSeconds);
+          currentSource.playbackRate.value = rate;
+          console.log(`[TTS] 🏃 Playback rate: ${rate.toFixed(2)} (backlog ~${backlogSeconds.toFixed(2)}s)`);
+          
+          // Create gain node for volume control
+          const gainNode = audioContext.createGain();
+          const volume = Number(volumeSlider.value) / 100;
+          gainNode.gain.value = volume;
+          
+          // Debug audio issues
+          console.log(`[TTS] 🔊 Audio buffer duration: ${decoded.duration}s`);
+          console.log(`[TTS] 🎚️ Volume setting: ${volume} (slider: ${volumeSlider.value})`);
+          console.log(`[TTS] 🎵 Sample rate: ${decoded.sampleRate}Hz`);
+          console.log(`[TTS] 📊 Number of channels: ${decoded.numberOfChannels}`);
+          
+          currentSource.connect(gainNode);
+          
+          // Route to chosen output device when supported
+          let destinationNode = audioContext.destination;
+          if (typeof Audio.prototype.setSinkId === 'function') {
+            await ensureSinkElement();
+            const msd = audioContext.createMediaStreamDestination();
+            gainNode.connect(msd);
+            sinkElement.srcObject = msd.stream;
+            await applySink();
+            destinationNode = null; // routed to element
+          }
+          
+          if (destinationNode) {
+            gainNode.connect(destinationNode);
+          }
+          
+          // Add compressor to prevent clipping
+          const compressor = audioContext.createDynamicsCompressor();
+          compressor.threshold.value = -24;
+          compressor.knee.value = 30;
+          compressor.ratio.value = 12;
+          compressor.attack.value = 0.003;
+          compressor.release.value = 0.25;
+          
+          if (destinationNode) {
+            gainNode.connect(compressor);
+            compressor.connect(audioContext.destination);
+          }
+          
+          ttsBadge.className = 'badge ok';
+          ttsBadge.textContent = 'TTS: playing';
+          
+          currentSource.onended = () => {
+            const playEndTime = Date.now();
+            const actualPlayDuration = playEndTime - playStartTime;
+            currentSource = null;
+            isTtsPlaying = false;
+            ttsBadge.className = 'badge ok';
+            ttsBadge.textContent = 'TTS: ready';
+            if (lineDiv) lineDiv.classList.add('spoken');
+            console.log(`[TTS] ✅ Playback completed`);
+            console.log(`[TTS] 📝 Spoken text: "${text}"`);
+            console.log(`[TTS] ⏱️ Actual play duration: ${actualPlayDuration}ms`);
+            console.log(`[TTS] 📊 End-to-end latency: ${playEndTime - ttsStartTime}ms`);
+            console.log(`[TTS] 🔄 Queue remaining: ${ttsQueue.length} items`);
+            console.log(`[TTS] ${'─'.repeat(60)}`);
+            playNext();
+          };
+          
+          const playStartTime = Date.now();
+          const totalLatency = playStartTime - ttsStartTime;
+          console.log(`[TTS] 🔊 Starting playback via WebAudio`);
+          console.log(`[TTS] ⏱️ Total TTS latency: ${totalLatency}ms`);
+          console.log(`[TTS] 🎵 Audio duration: ${Math.round(decoded.duration * 1000)}ms`);
+          currentSource.start(0);
+          
+        } catch (e) {
+          console.error('[TTS] WebAudio decode/play error:', e);
+          showError(`Audio decode error: ${e.message}`);
+          isTtsPlaying = false;
+          ttsBadge.className = 'badge err';
+          ttsBadge.textContent = 'TTS: error';
+          playNext();
+        }
+        
+      } catch (e) { 
+        console.error('[TTS] Exception:', e);
+        showError(`TTS error: ${e.message}`);
+        ttsBadge.className = 'badge err'; 
+        ttsBadge.textContent = 'TTS: error'; 
+        isTtsPlaying = false; 
+        playNext(); 
+      }
+    }
+
+    function enqueue(item) { 
+      if (!item || !item.text || ttsPaused) return; 
+      const enqueueTime = Date.now();
+      console.log(`[TTS] 📥 Enqueuing at ${new Date().toISOString()}`);
+      console.log(`[TTS] 📝 Text: "${item.text.substring(0, 100)}${item.text.length > 100 ? '...' : ''}"`);
+      console.log(`[TTS] 📏 Length: ${item.text.length} chars`);
+      console.log(`[TTS] 🔢 Queue size before: ${ttsQueue.length}`);
+      item.enqueuedAt = enqueueTime;
+      item.estimatedSeconds = estimateDurationSeconds(item.text);
+      queueEstimatedSeconds += item.estimatedSeconds;
+      ttsQueue.push(item); 
+      console.log(`[TTS] 🔢 Queue size after: ${ttsQueue.length}`);
+      if (!isTtsPlaying) {
+        console.log(`[TTS] ▶️ Auto-starting playback (TTS was idle)`);
+        playNext();
+      }
+    }
+    
+    function playNext() { 
+      if (ttsPaused || isTtsPlaying || !ttsQueue.length) return; 
+      const item = ttsQueue.shift(); 
+      if (typeof item.estimatedSeconds === 'number') {
+        queueEstimatedSeconds = Math.max(0, queueEstimatedSeconds - item.estimatedSeconds);
+      }
+      console.log(`[TTS] Playing next from queue: "${item.text}" (${ttsQueue.length} remaining)`);
+      isTtsPlaying = true; 
+      speakWithElevenLabs(item); 
+    }
+
+    function connectWS() {
+      if (ws && ws.readyState === WebSocket.OPEN) return;
+      
+      console.log('[WS] Connecting...');
+      ws = new WebSocket('ws://localhost:3001/ws');
+      
+      ws.onopen = () => {
+        console.log('[WS] Connected');
+        wsBadge.className = 'badge ok';
+        wsBadge.textContent = 'WS: connected';
+        errorDisplay.style.display = 'none';
+      };
+      
+      ws.onerror = (e) => {
+        console.error('[WS] Error:', e);
+        wsBadge.className = 'badge err';
+        wsBadge.textContent = 'WS: error';
+        showError('WebSocket connection error');
+      };
+      
+      ws.onclose = (e) => {
+        console.log(`[WS] Closed: ${e.code} ${e.reason}`);
+        wsBadge.className = 'badge warn';
+        wsBadge.textContent = 'WS: disconnected';
+        
+        // Auto-reconnect after 3 seconds
+        setTimeout(() => {
+          if (ws.readyState !== WebSocket.OPEN) {
+            console.log('[WS] Auto-reconnecting...');
+            connectWS();
+          }
+        }, 3000);
+      };
+      
+      ws.onmessage = async (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          const receiveTime = Date.now();
+          console.log(`[WS] 📨 Received: ${msg.type} at ${new Date().toISOString()}`);
+          
+          if (msg.type === 'debug') {
+            console.log(`[WS] Debug: ${msg.message || ''}`);
+          } else if (msg.type === 'translation' && msg.payload) {
+            const p = msg.payload;
+            const incomingLang = p.lang || '';
+            const displayLang = selectedTranslateLang || incomingLang || 'en-US';
+            const ttsLang = selectedTranslateLang || displayLang;
+            
+            // Handle segment changes
+            if (Number.isFinite(p.segmentId) && p.segmentId > state.segmentId) {
+              console.log(`[WS] 🔄 New segment ${p.segmentId} (was ${state.segmentId})`);
+              state.currentText = '';
+              state.lastSpokenEnd = 0;
+              state.segmentId = p.segmentId;
+            }
+            
+            // Apply the delta
+            if (Number.isFinite(p.replaceFrom)) {
+              state.currentText = state.currentText.substring(0, p.replaceFrom);
+              if (state.lastSpokenEnd > p.replaceFrom) {
+                state.lastSpokenEnd = p.replaceFrom;
+              }
+            }
+            
+            if (p.textSuffix) {
+              console.log(`[WS] 📝 Text suffix: "${p.textSuffix}" (${p.textSuffix.length} chars)`);
+              console.log(`[WS] 🏷️ Final: ${!!p.isFinal}, Lang(in): ${incomingLang} → Display/TTS: ${displayLang}`);
+              state.currentText += p.textSuffix;
+              state.lastUpdateAt = Date.now();
+              console.log(`[WS] 📊 Current text length: ${state.currentText.length} chars`);
+              const preview = await translateTextIfNeeded(state.currentText, incomingLang, displayLang);
+              updatePartialLine(displayLang, preview);
+              
+              // Process larger chunks to avoid repetition
+              const unspoken = state.currentText.substring(state.lastSpokenEnd);
+              
+              // Look for natural break points
+              const boundaries = /[.!?;]\s*/g;
+              const matches = [];
+              let match;
+              while ((match = boundaries.exec(unspoken)) !== null) {
+                matches.push({ index: match.index, length: match[0].length });
+              }
+              
+              // Speak at sentence boundaries, but wait for substantial content
+              let spoke = false;
+              if (matches.length > 0) {
+                const lastMatch = matches[matches.length - 1];
+                let chunk = unspoken.substring(0, lastMatch.index + lastMatch.length).trim();
+                
+                // CRITICAL FIX: Remove duplicate question marks or punctuation
+                chunk = chunk.replace(/(\?)\s*\1+/g, '$1'); // Remove duplicate ?
+                chunk = chunk.replace(/([.!])\s*\1+/g, '$1'); // Remove duplicate . or !
+                // Remove immediate repeated words (e.g., "transformateur transformateur")
+                chunk = chunk.replace(/\b(\w{3,})(?:[\s\-]+\1\b)+/gi, '$1');
+                
+                // Only speak if chunk is substantial and not a duplicate
+                if (chunk && chunk.length > 12) {
+                  let isDuplicate = false;
+                  
+                  // Enhanced duplicate detection
+                  for (const recent of state.recentChunks) {
+                    // Check for exact match
+                    if (recent === chunk) {
+                      isDuplicate = true;
+                      break;
+                    }
+                    // Check for substantial overlap (>70% similarity)
+                    const overlap = chunk.split(' ').filter(word => recent.includes(word)).length;
+                    const chunkWords = chunk.split(' ').length;
+                    if (overlap / chunkWords > 0.7) {
+                      isDuplicate = true;
+                      console.log(`[WS] 🚫 Duplicate detected (${Math.round(overlap/chunkWords*100)}% overlap)`)
+                      break;
+                    }
+                  }
+                  
+                  if (!isDuplicate) {
+                    // Strict: only enqueue after successful translation to target language
+                    console.log(`[WS] 🎯 Preparing chunk for TTS (strict translate): "${chunk.substring(0, 50)}..." → ${ttsLang}`);
+                    enqueueTranslatedOrRetry(chunk, incomingLang, ttsLang, partialLineDiv);
+                    state.lastSpokenEnd += lastMatch.index + lastMatch.length;
+                    
+                    // Track recent chunks
+                    state.recentChunks.add(chunk);
+                    if (state.recentChunks.size > 5) {
+                      const first = state.recentChunks.values().next().value;
+                      state.recentChunks.delete(first);
+                    }
+                    spoke = true;
+                  }
+                }
+              }
+              
+              // Stale fallback
+              if (!spoke) {
+                const now = Date.now();
+                const stale = now - state.lastUpdateAt > 700;
+                const longEnough = unspoken && unspoken.trim().length >= 28;
+                if (stale && longEnough) {
+                  let chunk = unspoken.trim();
+                  chunk = chunk.replace(/\b(\w{3,})(?:[\s\-]+\1\b)+/gi, '$1');
+                  let isDuplicate = false;
+                  for (const recent of state.recentChunks) {
+                    if (recent.includes(chunk) || chunk.includes(recent)) { isDuplicate = true; break; }
+                  }
+                  if (!isDuplicate) {
+                    console.log(`[WS] 🕒 Stale chunk (strict translate): "${chunk.substring(0, 50)}..." → ${ttsLang}`);
+                    enqueueTranslatedOrRetry(chunk, incomingLang, ttsLang, partialLineDiv);
+                    state.lastSpokenEnd = state.currentText.length;
+                    state.recentChunks.add(chunk);
+                    if (state.recentChunks.size > 5) {
+                      const first = state.recentChunks.values().next().value;
+                      state.recentChunks.delete(first);
+                    }
+                  }
+                }
+              }
+              
+              // If final, speak any remainder; prefer fullText if provided
+              if (p.isFinal) {
+                const finalTextRaw = (typeof p.fullText === 'string' && p.fullText.trim()) ? p.fullText.trim() : state.currentText;
+                const finalTextClean = finalTextRaw.replace(/\b(\w{3,})(?:[\s\-]+\1\b)+/gi, '$1');
+                const finalDisplay = await translateTextIfNeeded(finalTextClean, incomingLang, displayLang);
+                // Replace rolling partial with a single final line
+                if (partialLineDiv) {
+                  partialLineDiv.remove();
+                  partialLineDiv = null;
+                }
+                appendLine(finalDisplay, true, displayLang);
+                const remainderOrig = finalTextClean.substring(state.lastSpokenEnd).trim();
+                // Strict: only speak translated remainder
+                if (remainderOrig) {
+                  enqueueTranslatedOrRetry(remainderOrig, incomingLang, ttsLang, null);
+                  if (!isTtsPlaying) playNext();
+                }
+                state.currentText = '';
+                state.lastSpokenEnd = 0;
+                state.segmentId++;
+                state.recentChunks.clear();
+              }
+            }
+            
+            // Handle finals even when textSuffix is empty
+            if (!p.textSuffix && p.isFinal) {
+              // If we have a fullText, speak it directly
+              if (typeof p.fullText === 'string' && p.fullText.trim()) {
+                const ftClean = p.fullText.trim().replace(/\b(\w{3,})(?:[\s\-]+\1\b)+/gi, '$1');
+                const ftDisplay = await translateTextIfNeeded(ftClean, incomingLang, displayLang);
+                if (partialLineDiv) { partialLineDiv.remove(); partialLineDiv = null; }
+                appendLine(ftDisplay, true, displayLang);
+                enqueueTranslatedOrRetry(ftClean, incomingLang, ttsLang, null);
+                if (!isTtsPlaying) playNext();
+                state.currentText = '';
+                state.lastSpokenEnd = 0;
+                state.segmentId++;
+                state.recentChunks.clear();
+                console.log(`[WS] Final (no suffix) with fullText. Spoke full text and reset for segment ${state.segmentId}`);
+                return;
+              }
+              const remainder = state.currentText.substring(state.lastSpokenEnd).trim();
+              if (remainder) {
+                const r = remainder.replace(/\b(\w{3,})(?:[\s\-]+\1\b)+/gi, '$1');
+                enqueueTranslatedOrRetry(r, incomingLang, ttsLang, null);
+                if (!isTtsPlaying) playNext();
+              }
+              state.currentText = '';
+              state.lastSpokenEnd = 0;
+              state.segmentId++;
+              state.recentChunks.clear();
+              console.log(`[WS] Final with no suffix. Flushed remainder and reset for segment ${state.segmentId}`);
+            }
+          }
+        } catch (e) {
+          console.error('[WS] Message error:', e);
+        }
+      };
+    }
+    connectWS();
+
+    async function unlockAudioFull() {
+      try {
+        audioContext = audioContext || new (window.AudioContext || window.webkitAudioContext)();
+        console.log(`[Audio] Context state: ${audioContext.state}`);
+        
+        if (audioContext.state === 'suspended') {
+          console.log('[Audio] Resuming context...');
+          await audioContext.resume();
+        }
+        
+        // Create a silent buffer
+        const buffer = audioContext.createBuffer(1, 1, 22050);
+        const source = audioContext.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioContext.destination);
+        source.start(0);
+        
+        // Test with a short tone to verify audio works
+        const osc = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        gain.gain.value = 0.01; // Very quiet
+        osc.connect(gain).connect(audioContext.destination);
+        osc.frequency.value = 440;
+        osc.start();
+        osc.stop(audioContext.currentTime + 0.1);
+        
+        audioUnlocked = true;
+        audioBadge.className = 'badge ok'; 
+        audioBadge.textContent = 'Audio: unlocked';
+        unlockBtn.style.display = 'none';
+        unlockPrompt.style.display = 'none';
+        console.log('[Audio] Successfully unlocked');
+        
+        // Process any retry queue
+        if (retryQueue.length > 0) {
+          console.log(`[Audio] Processing ${retryQueue.length} queued items`);
+          while (retryQueue.length > 0) {
+            enqueue(retryQueue.shift());
+          }
+        }
+        
+      } catch (e) { 
+        console.error('[Audio] Unlock failed:', e);
+        audioBadge.className = 'badge warn'; 
+        audioBadge.textContent = 'Audio: blocked';
+        unlockBtn.style.display = 'block';
+        unlockPrompt.style.display = 'block';
+      }
+    }
+    
+    // Add multiple unlock attempts
+    document.addEventListener('DOMContentLoaded', () => { 
+      console.log('[Init] DOM loaded, attempting audio unlock');
+      unlockAudioFull();
+    });
+    
+    // More aggressive unlock on any interaction
+    ['click', 'touchstart', 'touchend', 'mousedown', 'keydown'].forEach(evt => { 
+      document.addEventListener(evt, async () => { 
+        if (!audioUnlocked) {
+          console.log(`[Audio] Attempting unlock on ${evt}`);
+          await unlockAudioFull();
+        }
+      }, { capture: true, passive: true }); 
+    });
+    
+    // Click on unlock prompt
+    unlockPrompt.onclick = async () => {
+      await unlockAudioFull();
+    };
+
+    async function preloadKey() {
+      try {
+        console.log('[Init] Loading ElevenLabs API key...');
+        const res = await fetch('http://localhost:3001/api/get-eleven-key');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.apiKey) { 
+            elevenApiKey = data.apiKey; 
+            ttsBadge.className = 'badge ok'; 
+            ttsBadge.textContent = 'TTS: ready';
+            console.log('[Init] API key loaded successfully');
+            // Auto-populate voices once key is available
+            await populateVoiceSelect();
+          }
+        } else {
+          showError('Failed to load ElevenLabs API key');
+        }
+      } catch(e) {
+        showError(`Failed to connect to server: ${e.message}`);
+        console.error('[Init] Key load error:', e);
+      }
+    }
+    preloadKey();
+  </script>
+</body>
+</html>

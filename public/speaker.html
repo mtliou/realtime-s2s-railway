@@ -1,0 +1,1222 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Speaker - Real-time Translation</title>
+  <script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@latest/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle-min.js"></script>
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+  <style>
+    :root { --bg: #0b1220; --card: rgba(255,255,255,0.06); --border: rgba(255,255,255,0.12); --text: #e8eefc; --muted: #9fb0d3; --accent: #7aa2ff; --good: #2ecc71; --warn: #f1c40f; --bad: #e74c3c; }
+    * { box-sizing: border-box }
+    body {
+      margin: 0; padding: 0; color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial;
+      background: radial-gradient(1200px 800px at 90% 110%, #1a2b5a 0%, rgba(26,43,90,0) 60%),
+                  radial-gradient(1000px 700px at -10% 90%, #20345f 0%, rgba(32,52,95,0) 50%),
+                  var(--bg);
+      min-height: 100vh;
+    }
+    .shell { max-width: 1100px; margin: 0 auto; padding: 28px; }
+    .header { display:flex; align-items:center; justify-content:space-between; margin-bottom: 18px; }
+    .title { font-weight: 700; letter-spacing: .3px; font-size: 20px; }
+    .badges { display:flex; gap:10px; }
+    .badge { padding:6px 10px; border:1px solid var(--border); border-radius:999px; background: var(--card); color: var(--muted); font-size: 12px; }
+    .badge.ok { color: var(--good); border-color: rgba(46,204,113,0.35) }
+    .badge.warn { color: var(--warn); border-color: rgba(241,196,15,0.35) }
+    .badge.err { color: var(--bad); border-color: rgba(231,76,60,0.35) }
+    .card { border:1px solid var(--border); background: var(--card); border-radius: 14px; overflow: hidden; }
+    .section { padding: 16px 18px; }
+    .controls { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+    .control-group { display: flex; align-items: center; gap: 8px; }
+    label { font-size: 13px; color: var(--muted); font-weight: 600; }
+    select, button { 
+      padding: 7px 14px; 
+      border: 1px solid var(--border); 
+      background: rgba(255,255,255,0.04); 
+      color: var(--text); 
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    select:hover, button:hover { background: rgba(255,255,255,0.08); border-color: var(--accent); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.primary { background: var(--accent); border-color: var(--accent); font-weight: 600; }
+    button.primary:hover { background: #5e8ce8; }
+    textarea { 
+      width: 100%; 
+      height: 400px; 
+      background: rgba(0,0,0,0.3); 
+      border: 1px solid var(--border); 
+      color: var(--text); 
+      padding: 12px; 
+      border-radius: 8px;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      resize: vertical;
+    }
+    textarea:focus { outline: none; border-color: var(--accent); }
+    h3 { margin:0 0 12px 0; font-size: 14px; color: var(--muted); font-weight:600; letter-spacing:.25px }
+    .feed { 
+      height: 240px; 
+      overflow-y: auto; 
+      background: rgba(0,0,0,0.3); 
+      border: 1px solid var(--border); 
+      border-radius: 8px;
+      padding: 12px;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      margin-bottom: 10px;
+    }
+    .feed::-webkit-scrollbar { width: 8px; }
+    .feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    .line { padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+    .line.final { color: var(--text); }
+    .line.partial { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="header">
+      <div class="title" data-translate="Real-time Translation • Speaker">Real-time Translation • Speaker</div>
+      <div class="badges">
+        <div id="wsBadge" class="badge">WS: disconnected</div>
+        <div id="azureBadge" class="badge">Azure: idle</div>
+        <div id="micBadge" class="badge">Mic: off</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section">
+        <div class="controls">
+          <div class="control-group">
+            <label data-translate="Source:">Source:</label>
+            <select id="sourceLang">
+              <option value="en-US" selected>English (US)</option>
+              <option value="en-GB">English (UK)</option>
+              <option value="en-AU">English (AU)</option>
+              <option value="en-IN">English (IN)</option>
+              <option value="fr-FR">French (FR)</option>
+              <option value="fr-CA">French (CA)</option>
+              <option value="es-ES">Spanish (ES)</option>
+              <option value="es-MX">Spanish (MX)</option>
+              <option value="de-DE">German</option>
+              <option value="it-IT">Italian</option>
+              <option value="pt-PT">Portuguese (PT)</option>
+              <option value="pt-BR">Portuguese (BR)</option>
+              <option value="nl-NL">Dutch</option>
+              <option value="sv-SE">Swedish</option>
+              <option value="nb-NO">Norwegian</option>
+              <option value="da-DK">Danish</option>
+              <option value="fi-FI">Finnish</option>
+              <option value="pl-PL">Polish</option>
+              <option value="ru-RU">Russian</option>
+              <option value="uk-UA">Ukrainian</option>
+              <option value="cs-CZ">Czech</option>
+              <option value="sk-SK">Slovak</option>
+              <option value="ro-RO">Romanian</option>
+              <option value="hu-HU">Hungarian</option>
+              <option value="el-GR">Greek</option>
+              <option value="tr-TR">Turkish</option>
+              <option value="he-IL">Hebrew</option>
+              <option value="ar-SA">Arabic (SA)</option>
+              <option value="ar-EG">Arabic (EG)</option>
+              <option value="fa-IR">Persian</option>
+              <option value="hi-IN">Hindi</option>
+              <option value="bn-IN">Bengali</option>
+              <option value="ta-IN">Tamil</option>
+              <option value="te-IN">Telugu</option>
+              <option value="th-TH">Thai</option>
+              <option value="vi-VN">Vietnamese</option>
+              <option value="id-ID">Indonesian</option>
+              <option value="ms-MY">Malay</option>
+              <option value="zh-CN">Chinese (CN)</option>
+              <option value="zh-TW">Chinese (TW)</option>
+              <option value="zh-HK">Chinese (HK)</option>
+              <option value="ja-JP">Japanese</option>
+              <option value="ko-KR">Korean</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label data-translate="Target:">Target:</label>
+            <select id="targetLang">
+              <option value="fr-FR" selected>French (FR)</option>
+              <option value="fr-CA">French (CA)</option>
+              <option value="en-US">English (US)</option>
+              <option value="en-GB">English (UK)</option>
+              <option value="en-AU">English (AU)</option>
+              <option value="en-IN">English (IN)</option>
+              <option value="es-ES">Spanish (ES)</option>
+              <option value="es-MX">Spanish (MX)</option>
+              <option value="de-DE">German</option>
+              <option value="it-IT">Italian</option>
+              <option value="pt-PT">Portuguese (PT)</option>
+              <option value="pt-BR">Portuguese (BR)</option>
+              <option value="nl-NL">Dutch</option>
+              <option value="sv-SE">Swedish</option>
+              <option value="nb-NO">Norwegian</option>
+              <option value="da-DK">Danish</option>
+              <option value="fi-FI">Finnish</option>
+              <option value="pl-PL">Polish</option>
+              <option value="ru-RU">Russian</option>
+              <option value="uk-UA">Ukrainian</option>
+              <option value="cs-CZ">Czech</option>
+              <option value="sk-SK">Slovak</option>
+              <option value="ro-RO">Romanian</option>
+              <option value="hu-HU">Hungarian</option>
+              <option value="el-GR">Greek</option>
+              <option value="tr-TR">Turkish</option>
+              <option value="he-IL">Hebrew</option>
+              <option value="ar-SA">Arabic (SA)</option>
+              <option value="ar-EG">Arabic (EG)</option>
+              <option value="fa-IR">Persian</option>
+              <option value="hi-IN">Hindi</option>
+              <option value="bn-IN">Bengali</option>
+              <option value="ta-IN">Tamil</option>
+              <option value="te-IN">Telugu</option>
+              <option value="th-TH">Thai</option>
+              <option value="vi-VN">Vietnamese</option>
+              <option value="id-ID">Indonesian</option>
+              <option value="ms-MY">Malay</option>
+              <option value="zh-CN">Chinese (CN)</option>
+              <option value="zh-TW">Chinese (TW)</option>
+              <option value="zh-HK">Chinese (HK)</option>
+              <option value="ja-JP">Japanese</option>
+              <option value="ko-KR">Korean</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label data-translate="Microphone:">Microphone:</label>
+            <select id="micSelect">
+              <option value="">Default</option>
+            </select>
+            <button id="refreshMics" title="Refresh devices">↻</button>
+          </div>
+          <div class="control-group">
+            <button id="startBtn" class="primary" data-translate="Start Translation">Start Translation</button>
+            <button id="stopBtn" disabled data-translate="Stop">Stop</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top: 18px;">
+      <div class="section">
+        <h3 data-translate="Live Transcript">Live Transcript</h3>
+        <div class="feed" id="transcriptFeed"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top: 18px;">
+      <div class="section">
+        <h3 data-translate="Phrase list (per source language)">Phrase list (per source language)</h3>
+        <div class="controls" style="margin-top:8px;">
+          <div class="control-group" style="align-items:flex-start; gap:12px; width:100%">
+            <div style="flex:1 1 100%">
+              <textarea id="phraseEditor" placeholder="One phrase per line. Custom phrases boost recognition for the selected Source language." style="height:160px"></textarea>
+              <div style="display:flex; gap:8px; margin-top:8px">
+                <button id="savePhrases" class="primary" data-translate="Save phrases for current Source">Save phrases for current Source</button>
+                <button id="resetPhrases" data-translate="Clear custom phrases">Clear custom phrases</button>
+              </div>
+              <div style="display:flex; align-items:center; gap:10px; margin-top:10px">
+                <input type="checkbox" id="includeDefaultPhrases" checked />
+                <label for="includeDefaultPhrases" data-translate="Include default conference phrase list (Love and Sex with Robots)">Include default conference phrase list (Love and Sex with Robots)</label>
+              </div>
+              <div style="margin-top:10px">
+                <label style="display:block; margin-bottom:6px; color: var(--muted); font-size:12px" data-translate="Exclude phrases (one per line; remove from default)">Exclude phrases (one per line; remove from default)</label>
+                <textarea id="excludeEditor" placeholder="Enter phrases from the default list you want to exclude…" style="height:100px"></textarea>
+              </div>
+              <div style="margin-top:14px">
+                <h3 style="margin-bottom:8px; font-size:13px; color: var(--muted)">Active phrases (runtime)</h3>
+                <div id="activePhrases" style="display:flex; flex-wrap:wrap; gap:6px"></div>
+                <div style="margin-top:8px; display:flex; gap:8px; align-items:center">
+                  <span id="activePhraseCount" style="font-size:12px; color: var(--muted)"></span>
+                  <button id="resetRuntimePhrases">Reset runtime removals</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Simple i18n for Speaker UI
+    const uiTranslations = {
+      en: {
+        'Real-time Translation • Speaker': 'Real-time Translation • Speaker',
+        'WS: connected': 'WS: connected',
+        'WS: disconnected': 'WS: disconnected',
+        'WS: error': 'WS: error',
+        'Azure: idle': 'Azure: idle',
+        'Azure: active': 'Azure: active',
+        'Azure: stopped': 'Azure: stopped',
+        'Azure: error': 'Azure: error',
+        'Mic: off': 'Mic: off',
+        'Mic: recording': 'Mic: recording',
+        'Source:': 'Source:',
+        'Target:': 'Target:',
+        'Microphone:': 'Microphone:',
+        'Start Translation': 'Start Translation',
+        'Stop': 'Stop',
+        'Live Transcript': 'Live Transcript',
+        'Phrase list (per source language)': 'Phrase list (per source language)',
+        'Save phrases for current Source': 'Save phrases for current Source',
+        'Clear custom phrases': 'Clear custom phrases',
+        'Include default conference phrase list (Love and Sex with Robots)': 'Include default conference phrase list (Love and Sex with Robots)',
+        'Exclude phrases (one per line; remove from default)': 'Exclude phrases (one per line; remove from default)'
+      },
+      fr: {
+        'Real-time Translation • Speaker': 'Traduction en temps réel • Orateur',
+        'WS: connected': 'WS : connecté',
+        'WS: disconnected': 'WS : déconnecté',
+        'WS: error': 'WS : erreur',
+        'Azure: idle': 'Azure : inactif',
+        'Azure: active': 'Azure : actif',
+        'Azure: stopped': 'Azure : arrêté',
+        'Azure: error': 'Azure : erreur',
+        'Mic: off': 'Mic : arrêté',
+        'Mic: recording': 'Mic : enregistrement',
+        'Source:': 'Source :',
+        'Target:': 'Cible :',
+        'Microphone:': 'Microphone :',
+        'Start Translation': 'Démarrer la traduction',
+        'Stop': 'Arrêter',
+        'Live Transcript': 'Transcription en direct',
+        'Phrase list (per source language)': 'Liste de phrases (par langue source)',
+        'Save phrases for current Source': 'Enregistrer les phrases pour la source actuelle',
+        'Clear custom phrases': 'Effacer les phrases personnalisées',
+        'Include default conference phrase list (Love and Sex with Robots)': 'Inclure la liste de phrases par défaut (Love and Sex with Robots)',
+        'Exclude phrases (one per line; remove from default)': 'Exclure des phrases (une par ligne ; retirer de la liste par défaut)'
+      },
+      es: {
+        'Real-time Translation • Speaker': 'Traducción en tiempo real • Orador',
+        'WS: connected': 'WS: conectado',
+        'WS: disconnected': 'WS: desconectado',
+        'WS: error': 'WS: error',
+        'Azure: idle': 'Azure: inactivo',
+        'Azure: active': 'Azure: activo',
+        'Azure: stopped': 'Azure: detenido',
+        'Azure: error': 'Azure: error',
+        'Mic: off': 'Mic: apagado',
+        'Mic: recording': 'Mic: grabando',
+        'Source:': 'Origen:',
+        'Target:': 'Destino:',
+        'Microphone:': 'Micrófono:',
+        'Start Translation': 'Iniciar traducción',
+        'Stop': 'Detener',
+        'Live Transcript': 'Transcripción en vivo',
+        'Phrase list (per source language)': 'Lista de frases (por idioma de origen)',
+        'Save phrases for current Source': 'Guardar frases para el origen actual',
+        'Clear custom phrases': 'Borrar frases personalizadas',
+        'Include default conference phrase list (Love and Sex with Robots)': 'Incluir la lista de frases predeterminada (Love and Sex with Robots)',
+        'Exclude phrases (one per line; remove from default)': 'Excluir frases (una por línea; quitar de la predeterminada)'
+      }
+    };
+    function langKeyFromNavigator() {
+      const nav = (navigator.language || navigator.userLanguage || 'en').toLowerCase();
+      if (nav.startsWith('fr')) return 'fr';
+      if (nav.startsWith('es')) return 'es';
+      return 'en';
+    }
+    function applyUITranslations() {
+      const k = langKeyFromNavigator();
+      const dict = uiTranslations[k] || uiTranslations.en;
+      document.querySelectorAll('[data-translate]').forEach(el => {
+        const key = el.getAttribute('data-translate');
+        if (dict[key]) el.textContent = dict[key];
+      });
+      // Also map badge initial texts if present
+      const wsBadge = document.getElementById('wsBadge');
+      const azureBadge = document.getElementById('azureBadge');
+      const micBadge = document.getElementById('micBadge');
+      if (wsBadge && dict[wsBadge.textContent]) wsBadge.textContent = dict[wsBadge.textContent];
+      if (azureBadge && dict[azureBadge.textContent]) azureBadge.textContent = dict[azureBadge.textContent];
+      if (micBadge && dict[micBadge.textContent]) micBadge.textContent = dict[micBadge.textContent];
+    }
+    document.addEventListener('DOMContentLoaded', applyUITranslations);
+    const transcriptFeed = document.getElementById('transcriptFeed');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const sourceLang = document.getElementById('sourceLang');
+    const targetLang = document.getElementById('targetLang');
+    const micSelect = document.getElementById('micSelect');
+    const refreshMics = document.getElementById('refreshMics');
+    const wsBadge = document.getElementById('wsBadge');
+    const azureBadge = document.getElementById('azureBadge');
+    const micBadge = document.getElementById('micBadge');
+    const phraseEditor = document.getElementById('phraseEditor');
+    const excludeEditor = document.getElementById('excludeEditor');
+    const includeDefaultPhrasesChk = document.getElementById('includeDefaultPhrases');
+    const savePhrasesBtn = document.getElementById('savePhrases');
+    const resetPhrasesBtn = document.getElementById('resetPhrases');
+    const activePhrasesEl = document.getElementById('activePhrases');
+    const activePhraseCountEl = document.getElementById('activePhraseCount');
+    const resetRuntimePhrasesBtn = document.getElementById('resetRuntimePhrases');
+
+    let reco = null;
+    let ws = null;
+    let authorizationToken = null;
+    let region = null;
+    let phraseHintSet = new Set();
+    let phraseListGrammar = null;
+    let sessionActivePhrases = [];
+    let sessionOriginalPhrases = [];
+
+    function renderActivePhrasesUI() {
+      if (!activePhrasesEl) return;
+      while (activePhrasesEl.firstChild) activePhrasesEl.removeChild(activePhrasesEl.firstChild);
+      const maxShow = 300;
+      const list = sessionActivePhrases.slice(0, maxShow);
+      list.forEach((p) => {
+        const tag = document.createElement('div');
+        tag.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid var(--border);border-radius:999px;background:rgba(255,255,255,0.04);font-size:12px;';
+        const span = document.createElement('span');
+        span.textContent = p;
+        const btn = document.createElement('button');
+        btn.textContent = '×';
+        btn.title = 'Remove from runtime';
+        btn.style.cssText = 'border:none;background:transparent;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;padding:0 2px;';
+        btn.onclick = () => runtimeRemovePhrase(p);
+        tag.appendChild(span);
+        tag.appendChild(btn);
+        activePhrasesEl.appendChild(tag);
+      });
+      if (activePhraseCountEl) {
+        activePhraseCountEl.textContent = `${sessionActivePhrases.length} active phrase${sessionActivePhrases.length===1?'':'s'} (${list.length < sessionActivePhrases.length ? `showing ${list.length}` : 'showing all'})`;
+      }
+    }
+    function rebuildGrammarFromSessionList() {
+      if (!phraseListGrammar) return;
+      phraseListGrammar.clear();
+      const cap = sessionActivePhrases.slice(0, 500);
+      cap.forEach(p => phraseListGrammar.addPhrase(p));
+      // refresh rescoring tokens
+      phraseHintSet = new Set();
+      cap.forEach(p => String(p).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean).forEach(tok => phraseHintSet.add(tok)));
+      renderActivePhrasesUI();
+      append(`[phrases] Runtime updated → ${cap.length} active`);
+    }
+    function runtimeRemovePhrase(phrase) {
+      const idx = sessionActivePhrases.indexOf(phrase);
+      if (idx >= 0) {
+        sessionActivePhrases.splice(idx, 1);
+        if (excludeEditor && !excludeEditor.value.split(/\r?\n/).includes(phrase)) {
+          excludeEditor.value = (excludeEditor.value ? excludeEditor.value + '\n' : '') + phrase;
+        }
+        rebuildGrammarFromSessionList();
+      }
+    }
+    if (resetRuntimePhrasesBtn) {
+      resetRuntimePhrasesBtn.onclick = () => {
+        sessionActivePhrases = sessionOriginalPhrases.slice();
+        rebuildGrammarFromSessionList();
+      };
+    }
+    const preferLocalTranslation = true; // favor translating our corrected source text
+    
+    // State management with better overlap detection
+    const state = {
+      sentText: '',      // All text we've sent so far
+      pendingText: '',   // Text we're waiting to send
+      lastUpdateTime: 0,
+      segmentId: 0,
+      stabilityTimer: null,
+      lastPartialTranslateAt: 0,
+      lastPartialSource: ''
+    };
+
+    let partialDiv = null; // rolling partial line
+    function appendLine(text, isFinal=false) {
+      const div = document.createElement('div');
+      div.className = `line ${isFinal ? 'final' : 'partial'}`;
+      div.textContent = text;
+      transcriptFeed.appendChild(div);
+      transcriptFeed.scrollTop = transcriptFeed.scrollHeight;
+      return div;
+    }
+    function updatePartial(text) {
+      const display = text.trim();
+      if (!partialDiv) partialDiv = appendLine(display, false);
+      else partialDiv.textContent = display;
+    }
+    function addFinal(text) {
+      if (partialDiv) { partialDiv.remove(); partialDiv = null; }
+      appendLine(text, true);
+    }
+    // Generic logger used throughout
+    function append(text) {
+      const div = document.createElement('div');
+      div.className = 'line partial';
+      div.textContent = String(text || '');
+      transcriptFeed.appendChild(div);
+      transcriptFeed.scrollTop = transcriptFeed.scrollHeight;
+      return div;
+    }
+
+    // Domain-specific normalization to correct common misrecognitions
+    function normalizeSource(text) {
+      let t = String(text || '');
+      const reps = [
+        [/\bcapital intelligence\b/gi, 'artificial intelligence'],
+        [/\bcapitol intelligence\b/gi, 'artificial intelligence'],
+        [/\bliquid neural network\b/gi, 'recurrent neural network'],
+        [/\btransformer\s*based\s*encoder\b/gi, 'transformer-based encoder'],
+        [/\bweb ?socket\b/gi, 'WebSocket'],
+        [/\bwebsite of the lake\b/gi, 'WebSocket relay'],
+        [/\bthe website\b/gi, 'the WebSocket relay']
+      ];
+      for (const [re, val] of reps) t = t.replace(re, val);
+      return t;
+    }
+
+    async function ensureAudioPermission() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(t => t.stop());
+        return true;
+      } catch (e) {
+        append('Microphone permission denied');
+        return false;
+      }
+    }
+
+    async function enumerateMics() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const mics = devices.filter(d => d.kind === 'audioinput');
+        const prev = micSelect.value;
+        // clear
+        while (micSelect.firstChild) micSelect.removeChild(micSelect.firstChild);
+        const defOpt = document.createElement('option');
+        defOpt.value = '';
+        defOpt.textContent = 'Default';
+        micSelect.appendChild(defOpt);
+        mics.forEach(d => {
+          const opt = document.createElement('option');
+          opt.value = d.deviceId;
+          opt.textContent = d.label || `Microphone ${micSelect.children.length}`;
+          micSelect.appendChild(opt);
+        });
+        // restore selection when possible
+        const found = Array.from(micSelect.options).some(o => o.value === prev);
+        micSelect.value = found ? prev : '';
+        const selLabel = micSelect.selectedOptions[0]?.textContent || 'Default';
+        micBadge.className = 'badge ok';
+        micBadge.textContent = `Mic: ${selLabel}`;
+      } catch (e) {
+        append('Failed to enumerate microphones');
+      }
+    }
+
+    refreshMics.onclick = async () => {
+      await ensureAudioPermission();
+      await enumerateMics();
+    };
+
+    if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+      navigator.mediaDevices.addEventListener('devicechange', enumerateMics);
+    }
+
+    async function getToken() {
+      const res = await axios.get('/api/get-speech-token');
+      authorizationToken = res.data.token;
+      region = res.data.region;
+      window.__speechEndpointId = res.data.endpointId || '';
+    }
+
+    function openWS() {
+      if (ws && ws.readyState === WebSocket.OPEN) return;
+      const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+      ws = new WebSocket(wsUrl);
+      ws.onopen = () => {
+        append('[ws] speaker connected');
+        wsBadge.className = 'badge ok';
+        wsBadge.textContent = 'WS: connected';
+      };
+      ws.onerror = (e) => {
+        append('[ws] speaker error');
+        wsBadge.className = 'badge err';
+        wsBadge.textContent = 'WS: error';
+      };
+      ws.onclose = () => {
+        append('[ws] speaker closed');
+        wsBadge.className = 'badge warn';
+        wsBadge.textContent = 'WS: disconnected';
+      };
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'debug') append(`[ws] debug: ${msg.message || ''}`);
+        } catch(_) {}
+      };
+    }
+
+    function getLangKeyFromCode(code) {
+      const lc = (code || '').toLowerCase();
+      if (lc.startsWith('fr')) return 'fr';
+      if (lc.startsWith('es')) return 'es';
+      return 'en';
+    }
+
+    function getUserPhrasesFor(langCode) {
+      try {
+        const raw = localStorage.getItem(`userPhrases.${langCode}`) || '';
+        // Stored as newline-separated lines
+        return raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      } catch(_) { return []; }
+    }
+
+    function setUserPhrasesFor(langCode, lines) {
+      const unique = Array.from(new Set((lines || []).map(s => s.trim()).filter(Boolean)));
+      localStorage.setItem(`userPhrases.${langCode}`, unique.join('\n'));
+    }
+
+    function getUserExcludesFor(langCode) {
+      try {
+        const raw = localStorage.getItem(`userPhrasesExclude.${langCode}`) || '';
+        return raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      } catch(_) { return []; }
+    }
+
+    function setUserExcludesFor(langCode, lines) {
+      const unique = Array.from(new Set((lines || []).map(s => s.trim()).filter(Boolean)));
+      localStorage.setItem(`userPhrasesExclude.${langCode}`, unique.join('\n'));
+    }
+
+    function getIncludeDefaultFlag(langCode) {
+      try {
+        const v = localStorage.getItem(`includeDefaultPhrases.${langCode}`);
+        return v === null ? true : v === 'true';
+      } catch(_) { return true; }
+    }
+
+    function setIncludeDefaultFlag(langCode, flag) {
+      localStorage.setItem(`includeDefaultPhrases.${langCode}`, !!flag);
+    }
+
+    function loadPhraseEditorFor(langCode) {
+      const lines = getUserPhrasesFor(langCode);
+      phraseEditor.value = lines.join('\n');
+      const ex = getUserExcludesFor(langCode);
+      excludeEditor.value = ex.join('\n');
+      includeDefaultPhrasesChk.checked = getIncludeDefaultFlag(langCode);
+    }
+
+    sourceLang.onchange = () => {
+      loadPhraseEditorFor(sourceLang.value);
+    };
+
+    savePhrasesBtn.onclick = () => {
+      const lines = phraseEditor.value.split(/\r?\n/);
+      const excludes = excludeEditor.value.split(/\r?\n/);
+      setUserPhrasesFor(sourceLang.value, lines);
+      setUserExcludesFor(sourceLang.value, excludes);
+      setIncludeDefaultFlag(sourceLang.value, includeDefaultPhrasesChk.checked);
+      append(`[phrases] Saved ${lines.filter(s => s.trim()).length} custom and ${excludes.filter(s => s.trim()).length} excluded phrase lines for ${sourceLang.value}`);
+      append(`[phrases] Default list: ${includeDefaultPhrasesChk.checked ? 'ON' : 'OFF'} — changes apply to new sessions. Stop/Start to rebuild.`);
+    };
+
+    resetPhrasesBtn.onclick = () => {
+      localStorage.removeItem(`userPhrases.${sourceLang.value}`);
+      localStorage.removeItem(`userPhrasesExclude.${sourceLang.value}`);
+      // Keep the default toggle as the current checkbox state
+      setIncludeDefaultFlag(sourceLang.value, includeDefaultPhrasesChk.checked);
+      loadPhraseEditorFor(sourceLang.value);
+      append(`[phrases] Cleared custom/excluded phrases for ${sourceLang.value}`);
+      append(`[phrases] Default list remains ${includeDefaultPhrasesChk.checked ? 'ON' : 'OFF'}. Stop/Start to rebuild.`);
+    };
+
+    // Send only genuinely new text
+    function sendNewText(lang, newFullText, isFinal) {
+      console.log(`[SEND] ====== Processing text ======`);
+      console.log(`[SEND] 📝 New full text: "${newFullText}"`);
+      console.log(`[SEND] 📌 Previously sent: "${state.sentText}"`);
+      console.log(`[SEND] 🏁 Is final: ${isFinal}`);
+      // Find what's genuinely new by comparing with what we've sent
+      let toSend = '';
+      let replaceFrom = 0;
+      
+      if (!state.sentText) {
+        // First text - send everything
+        toSend = newFullText;
+        replaceFrom = 0;
+      } else if (newFullText.startsWith(state.sentText)) {
+        // New text extends what we sent - send only the new part
+        toSend = newFullText.substring(state.sentText.length);
+        replaceFrom = state.sentText.length;
+      } else {
+        // Text has changed - find the overlap
+        // Look for the longest suffix of sentText that is a prefix of newFullText
+        for (let i = state.sentText.length; i > 0; i--) {
+          if (newFullText.startsWith(state.sentText.substring(0, i))) {
+            replaceFrom = i;
+            toSend = newFullText.substring(i);
+            break;
+          }
+        }
+        if (!toSend) {
+          // No overlap found - this is completely new text
+          toSend = newFullText;
+          replaceFrom = 0;
+        }
+      }
+      
+      // Only send if we have new content
+      if (toSend && toSend.trim()) {
+        const sendTime = Date.now();
+        console.log(`[SEND] 🚀 Sending delta:`);
+        console.log(`[SEND] 📝 Text suffix: "${toSend}"`);
+        console.log(`[SEND] 📍 Replace from position: ${replaceFrom}`);
+        console.log(`[SEND] 📏 Delta length: ${toSend.length} chars`);
+        console.log(`[SEND] 🆔 Segment ID: ${state.segmentId}`);
+        append(`[${isFinal ? 'final' : 'partial'} ${lang}] ${toSend}`);
+        
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'speak',
+            payload: {
+              lang,
+              segmentId: state.segmentId,
+              replaceFrom,
+              textSuffix: toSend,
+              isFinal,
+              fullText: isFinal ? newFullText : undefined
+            }
+          }));
+        }
+        
+        // Update what we've sent
+        state.sentText = newFullText;
+        console.log(`[SEND] ✅ Updated sentText to: "${state.sentText}"`);
+        console.log(`[SEND] ${'─'.repeat(50)}`);
+      } else {
+        console.log(`[SEND] ⏭️ Skipping - no new content to send`);
+        console.log(`[SEND] ${'─'.repeat(50)}`);
+      }
+    }
+
+    // Process pending text with stability delay
+    function processPendingText(lang, isFinal = false) {
+      console.log(`[PROCESS] 🔄 Processing pending text`);
+      console.log(`[PROCESS] 📝 Pending: "${state.pendingText}"`);
+      console.log(`[PROCESS] 🏁 Is final: ${isFinal}`);
+      
+      if (state.stabilityTimer) {
+        clearTimeout(state.stabilityTimer);
+        state.stabilityTimer = null;
+        console.log(`[PROCESS] ⏰ Cleared existing stability timer`);
+      }
+      
+      if (isFinal) {
+        // Send immediately for final results
+        console.log(`[PROCESS] 🏁 Final result - sending immediately`);
+        sendNewText(lang, state.pendingText, true);
+        // Reset for next segment
+        const prevSegmentId = state.segmentId;
+        state.sentText = '';
+        state.pendingText = '';
+        state.segmentId++;
+        console.log(`[PROCESS] 🔄 Reset state for segment ${prevSegmentId} -> ${state.segmentId}`);
+      } else {
+        // For partials, wait for stability
+        state.stabilityTimer = setTimeout(() => {
+          if (state.pendingText && state.pendingText !== state.sentText) {
+            // Check if we have a good chunk to send (e.g., ends with punctuation or is long enough)
+            const trimmed = state.pendingText.trim();
+            const endsWithPunctuation = /[.!?,;:]\s*$/.test(trimmed);
+            const longEnough = trimmed.length - (state.sentText ? state.sentText.length : 0) > 40;
+            
+            if (endsWithPunctuation || longEnough) {
+              console.log(`[PROCESS] ✅ Stable chunk detected:`);
+              console.log(`[PROCESS] 📍 Ends with punctuation: ${endsWithPunctuation}`);
+              console.log(`[PROCESS] 📏 Long enough (>30 new chars): ${longEnough}`);
+              sendNewText(lang, state.pendingText, false);
+            } else {
+              console.log(`[PROCESS] ⏳ Waiting for more stable text`);
+            }
+          }
+        }, 900); // Favor accuracy with a bit more latency
+      }
+    }
+
+    startBtn.onclick = async () => {
+      startBtn.disabled = true; 
+      stopBtn.disabled = false;
+      
+      // Permissions and device list
+      await ensureAudioPermission();
+      await enumerateMics();
+
+      await getToken();
+      openWS();
+
+      const speechConfig = SpeechSDK.SpeechTranslationConfig.fromAuthorizationToken(authorizationToken, region);
+      if (window.__speechEndpointId && typeof speechConfig.setServiceProperty === 'function') {
+        speechConfig.setServiceProperty('cid', window.__speechEndpointId, SpeechSDK.ServicePropertyChannel.UriQueryParameter);
+      }
+      speechConfig.speechRecognitionLanguage = sourceLang.value;
+      speechConfig.addTargetLanguage(targetLang.value);
+      
+      // Enhanced ASR configuration for better accuracy
+      speechConfig.setProperty('SpeechServiceResponse_StablePartialResultThreshold', '9'); // accept more latency for higher accuracy
+      speechConfig.setProperty('SpeechServiceResponse_PostProcessingOption', 'TrueText');
+      speechConfig.setProperty('SpeechServiceConnection_EndSilenceTimeoutMs', '2500'); // avoid premature finals
+      speechConfig.setProperty('SpeechServiceConnection_InitialSilenceTimeoutMs', '5000');
+      speechConfig.setProperty('SpeechServiceResponse_ProfanityOption', 'Raw');
+      speechConfig.setProperty('SpeechServiceResponse_MaxNBest', '8');
+      
+      // Use conversation mode for better context
+      speechConfig.setProperty('SpeechServiceConnection_RecoLanguage', sourceLang.value);
+      speechConfig.setProperty('SpeechServiceConnection_RecoMode', 'conversation');
+      
+      // Improve number and technical term recognition  
+      speechConfig.setProperty('SpeechServiceResponse_OutputFormatOption', 'Detailed');
+      if (typeof speechConfig.enableDictation === 'function') {
+        speechConfig.enableDictation();
+      }
+
+      let audioConfig;
+      try {
+        const deviceId = micSelect.value || undefined;
+        const constraints = {
+          audio: {
+            deviceId: deviceId ? { exact: deviceId } : undefined,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+            sampleRate: 16000
+          }
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        if (typeof SpeechSDK.AudioConfig.fromStreamInput === 'function') {
+          audioConfig = SpeechSDK.AudioConfig.fromStreamInput(stream);
+        } else if (deviceId && typeof SpeechSDK.AudioConfig.fromMicrophoneInput === 'function') {
+          audioConfig = SpeechSDK.AudioConfig.fromMicrophoneInput(deviceId);
+        } else {
+          audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
+        }
+      } catch (_) {
+        audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
+      }
+      
+      reco = new SpeechSDK.TranslationRecognizer(speechConfig, audioConfig);
+
+      // EXPANDED Phrase hints, including conference phrase list (localized where available) + user custom phrases
+      try {
+        const phraseList = SpeechSDK.PhraseListGrammar.fromRecognizer(reco);
+        const src = (sourceLang.value || 'en-US').toLowerCase();
+        const langKey = src.startsWith('fr') ? 'fr' : (src.startsWith('es') ? 'es' : 'en');
+        const basePhrases = [
+          'What time is the meeting scheduled for',
+          'This model is trained on a diverse dataset',
+          'Safari and Chrome',
+          'recurrent neural network',
+          'transformer-based encoder',
+          'to process acoustic features',
+          'gate B12',
+          'arriving at nineteen twenty-five',
+          'latency and intelligibility',
+          'improve generalization',
+          'partial results become larger meaningful chunks',
+          'meaningful chunks',
+          'repetition does not occur',
+          'synthesize continuously with low latency',
+          'the listener hears each chunk only once',
+          'handling punctuation properly',
+          'splitting where appropriate',
+          'always playing the last sentence promptly when I stop',
+          'As I proceed',
+          'Finally, I\'ll stop right here',
+          'Can you hear me clearly',
+          'Is there any delay',
+          'Do you notice any repetition',
+          'Welcome to the conference',
+          'Thank you for joining',
+          'Azure Cognitive Services',
+          'Speech SDK',
+          'WebSocket relay',
+          'ElevenLabs TTS model',
+          'text to speech',
+          'artificial intelligence',
+          'machine learning algorithms',
+          'neural network',
+          'transformer',
+          'acoustic features',
+          'validated the pipeline',
+          'macOS and iOS',
+          'buffer management',
+          'queueing',
+          'queuing',
+          'segment resets',
+          'final-segment flushing',
+          'final segment flushing',
+          'autoplay constraints',
+          'voice selection',
+          'browser autoplay constraints',
+          'low latency synthesis',
+          'Friday June twenty-seventh',
+          'twenty twenty-five',
+          'three forty-five PM',
+          'nineteen twenty-five',
+          'one thousand two hundred thirty-four dollars and fifty-six cents',
+          'twenty-seven participants',
+          'three sessions',
+          'flight AF three forty-eight',
+          'The quick brown fox jumps over the lazy dog',
+          'The budget is one thousand two hundred thirty-four dollars and fifty-six cents'
+        ];
+        const acronyms = ['ROS', 'SLAM', 'RPA', 'AGV', 'AI', 'IoT'];
+        const confPhrases = {
+          en: [
+            // Robotics
+            'Robot Emotions','Humanoid Robots','Clone Robots','Entertainment Robots','Robot Personalities','Roboethics',
+            // SexTech
+            'Teledildonics','Virtual Reality','Augmented Reality','Mixed Reality','AI Companions','Intelligent Electronic Adult Hardware','Adult Chatbots',
+            // Approaches
+            'Affective','Psychological','Sociological','Philosophical','Sexological','Gender/Sex','Feminist & Intersectional','Clinical'
+          ],
+          fr: [
+            'Émotions des robots','Robots humanoïdes','Robots clones','Robots de divertissement','Personnalités des robots','Roboéthique',
+            'Télédildonique','Réalité virtuelle','Réalité augmentée','Réalité mixte','Compagnons IA','Matériel électronique adulte intelligent','Chatbots pour adultes',
+            'Affectif','Psychologique','Sociologique','Philosophique','Sexologique','Genre/Sexe','Féministe et intersectionnel','Clinique'
+          ],
+          es: [
+            'Emociones de los robots','Robots humanoides','Robots clon','Robots de entretenimiento','Personalidades de robots','Roboética',
+            'Teledildónica','Realidad virtual','Realidad aumentada','Realidad mixta','Compañeros de IA','Hardware electrónico adulto inteligente','Chatbots para adultos',
+            'Afectivo','Psicológico','Sociológico','Filosófico','Sexológico','Género/Sexo','Feminista e interseccional','Clínico'
+          ]
+        };
+        // Build phrase set with include/exclude logic
+        const phrases = new Set();
+        const includeDefault = getIncludeDefaultFlag(sourceLang.value);
+        if (includeDefault) {
+          // Focus hints on conference terms and acronyms only to reduce bias
+          acronyms.forEach(p => phrases.add(p));
+          (confPhrases[langKey] || confPhrases.en).forEach(p => phrases.add(p));
+          confPhrases.en.forEach(p => phrases.add(p));
+        }
+        // Merge user-provided phrases for the exact source language code
+        getUserPhrasesFor(sourceLang.value).forEach(p => phrases.add(p));
+        // Apply excludes
+        const excludes = new Set(getUserExcludesFor(sourceLang.value));
+        let added = 0, removed = 0;
+        for (const p of Array.from(phrases)) {
+          if (excludes.has(p)) { phrases.delete(p); removed++; }
+        }
+        phrases.forEach(p => { phraseList.addPhrase(p); added++; });
+        // local hint set for rescoring
+        phraseHintSet = new Set();
+        Array.from(phrases).forEach(p => {
+          String(p).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean).forEach(tok => phraseHintSet.add(tok));
+        });
+        console.log(`[ASR] 📚 Phrase list built for ${langKey}/${sourceLang.value} → added: ${added}, removed: ${removed}, includeDefault: ${includeDefault}`);
+      } catch(_) {}
+
+      reco.recognizing = async (s, e) => {
+        if (!e.result) return;
+        
+        // Enhanced confidence filtering with detailed logging + simple rescoring
+        if (e.result.reason === SpeechSDK.ResultReason.RecognizingSpeech) {
+          const jsonResult = e.result.properties?.getProperty('SpeechServiceResponse_JsonResult');
+          if (jsonResult) {
+            try {
+              const json = JSON.parse(jsonResult);
+              const picked = (function pick() {
+                try {
+                  const nbest = Array.isArray(json.NBest) ? json.NBest : [];
+                  if (!nbest.length) return { text: e.result.text, conf: 0 };
+                  let best = nbest[0];
+                  let bestScore = -Infinity;
+                  for (const cand of nbest) {
+                    const text = (cand.Display || cand.Lexical || '').trim();
+                    const conf = typeof cand.Confidence === 'number' ? cand.Confidence : 0;
+                    const tokens = text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+                    let hits = 0;
+                    for (const t of tokens) if (phraseHintSet.has(t)) hits++;
+                    const overlap = tokens.length ? hits / tokens.length : 0;
+                    const endsPunct = /[.!?]\s*$/.test(text) ? 1 : 0;
+                    const score = conf + 0.15 * overlap + 0.03 * endsPunct;
+                    if (score > bestScore) { best = cand; bestScore = score; }
+                  }
+                  return { text: (best.Display || best.Lexical || e.result.text).trim(), conf: best.Confidence || 0 };
+                } catch(_) { return { text: e.result.text, conf: 0 }; }
+              })();
+              const conf = picked.conf || 0;
+              const text = picked.text || e.result.text;
+              
+              // Log confidence for debugging
+              if (conf < 0.7) {
+                console.log(`[ASR] ⚠️ Low confidence (${conf.toFixed(2)}): "${text}"`);
+              }
+              
+              // Gate out low-confidence partials more aggressively
+              if (conf < 0.55) {
+                console.log(`[ASR] ❌ Rejecting: confidence too low`);
+                return;
+              }
+              e.result.text = text;
+            } catch(err) {
+              console.log(`[ASR] Failed to parse confidence:`, err);
+            }
+          }
+        }
+        
+        const now = Date.now();
+        state.lastUpdateTime = now;
+        console.log(`[ASR] 🎤 Recognizing event at ${new Date().toISOString()}`);
+        
+        // Handle translations (skip Azure inline translation to favor corrected source → server translator)
+        try {
+          const translations = e.result.translations;
+          if (!preferLocalTranslation && translations && translations.size && typeof translations.get === 'function') {
+            let lang = targetLang.value;
+            let text = translations.get(lang);
+            if (!text) {
+              for (const [k, v] of translations.entries()) { 
+                lang = k; 
+                text = v; 
+                break; 
+              }
+            }
+            if (text) {
+              console.log(`[ASR] 🌐 Translation received: "${text}" (${lang})`);
+              state.pendingText = text;
+              processPendingText(lang, false);
+              return;
+            }
+          }
+        } catch(_) {}
+        
+        // Re-enable throttled partial fallback translation for streaming when Azure doesn't provide a translation
+        if (e.result.text) {
+          const src = normalizeSource(e.result.text);
+          updatePartial(src);
+          const nowTs = Date.now();
+          const since = nowTs - (state.lastPartialTranslateAt || 0);
+          const minIntervalMs = 1200;
+          const minLen = 40;
+          const growth = src.length - (state.lastPartialSource ? state.lastPartialSource.length : 0);
+          const endsWithPunct = /[\.!?,;:]\s*$/.test(src.trim());
+          if (src.length >= minLen && (since > minIntervalMs || endsWithPunct || growth > 20)) {
+            try {
+              const resp = await fetch('/api/translate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: src, to: targetLang.value })
+              });
+              if (resp.ok) {
+                const data = await resp.json();
+                if (data.translation) {
+                  state.pendingText = data.translation;
+                  // Process as partial; stability gate will decide if it sends now
+                  processPendingText(targetLang.value, false);
+                  state.lastPartialTranslateAt = nowTs;
+                  state.lastPartialSource = src;
+                }
+              }
+            } catch(_) {}
+          }
+        }
+      };
+
+      reco.recognized = async (s, e) => {
+        const result = e.result;
+        if (!result) return;
+        
+        console.log(`[ASR] 🎯 Recognized event at ${new Date().toISOString()}`);
+        
+        // Log detailed recognition info (rescored)
+        const jsonResult = result.properties?.getProperty('SpeechServiceResponse_JsonResult');
+        if (jsonResult) {
+          try {
+            const json = JSON.parse(jsonResult);
+            const nbest = Array.isArray(json.NBest) ? json.NBest : [];
+            if (nbest.length) {
+              let best = nbest[0], bestScore = -Infinity;
+              for (const cand of nbest) {
+                const text = (cand.Display || cand.Lexical || '').trim();
+                const conf = typeof cand.Confidence === 'number' ? cand.Confidence : 0;
+                const tokens = text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+                let hits = 0; for (const t of tokens) if (phraseHintSet.has(t)) hits++;
+                const overlap = tokens.length ? hits / tokens.length : 0;
+                const endsPunct = /[.!?]\s*$/.test(text) ? 1 : 0;
+                const score = conf + 0.15 * overlap + 0.03 * endsPunct;
+                if (score > bestScore) { best = cand; bestScore = score; }
+              }
+              const conf = best.Confidence || 0;
+              console.log(`[ASR] 📊 Final confidence (rescored): ${conf.toFixed(2)}`);
+              const pickedText = normalizeSource((best.Display || best.Lexical || result.text).trim());
+              if (pickedText) result.text = pickedText;
+            }
+          } catch(_) {}
+        }
+        
+        if (result.text) {
+          // Check for common misrecognitions and warn
+          const misrecognitions = {
+            'Scheduled for': 'What time is the meeting scheduled for',
+            'But first data set': 'This model is trained on a diverse dataset',
+            'Saffron Chrome': 'Safari and Chrome',
+            'uses a route': 'uses a recurrent neural network',
+            'Odor to process': 'encoder to process',
+            '25 Get': '25, gate B12'
+          };
+          
+          for (const [wrong, right] of Object.entries(misrecognitions)) {
+            if (result.text.includes(wrong)) {
+              console.log(`[ASR] ⚠️ Possible misrecognition: "${wrong}" (expected "${right}")`);
+            }
+          }
+          
+          console.log(`[ASR] 📝 Final source text: "${result.text}"`);
+          addFinal(result.text);
+        }
+        
+        // Handle final translations (prefer translating corrected source)
+        try {
+          const translations = result.translations;
+          if (!preferLocalTranslation && translations && translations.size && typeof translations.get === 'function') {
+            let lang = targetLang.value;
+            let text = translations.get(lang);
+            if (!text) {
+              for (const [k, v] of translations.entries()) { 
+                lang = k; 
+                text = v; 
+                break; 
+              }
+            }
+            if (text) {
+              const trimmed = text.trim();
+              const endsWithPunct = /[.!?]\s*$/.test(trimmed);
+              // If Azure produced a very short or mid-sentence final, merge as partial
+              if (!endsWithPunct || trimmed.length < 40) {
+                console.log(`[ASR] 🔁 Short/unfinished final detected → treating as partial to merge`);
+                updatePartial(trimmed);
+                state.pendingText = text;
+                processPendingText(lang, false);
+                return;
+              }
+              console.log(`[ASR] 🌐 Final translation: "${text}" (${lang})`);
+              addFinal(`${lang}: ${text}`);
+              state.pendingText = text;
+              processPendingText(lang, true);
+              return;
+            }
+          }
+        } catch(err) {
+          append(`[final trans error] ${err.message}`);
+        }
+        
+        // Fallback: translate the final source text
+        if (result.text) {
+          try {
+            const resp = await fetch('/api/translate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text: normalizeSource(result.text), to: targetLang.value })
+            });
+            if (resp.ok) {
+              const data = await resp.json();
+              if (data.translation) {
+                const text = data.translation;
+                const trimmed = text.trim();
+                const endsWithPunct = /[.!?]\s*$/.test(trimmed);
+                // Apply the same short/unfinished heuristic to fallback finals
+                if (!endsWithPunct || trimmed.length < 40) {
+                  console.log(`[ASR] 🔁 (fallback) Short/unfinished final detected → treating as partial to merge`);
+                  updatePartial(trimmed);
+                  state.pendingText = text;
+                  processPendingText(targetLang.value, false);
+                } else {
+                  addFinal(`${targetLang.value}: ${text}`);
+                  state.pendingText = text;
+                  processPendingText(targetLang.value, true);
+                }
+              }
+            }
+          } catch(err) {
+            append(`[final trans fallback error] ${err.message}`);
+          }
+        }
+      };
+
+      reco.canceled = (s, e) => {
+        append(`(cancel) ${e.errorDetails || ''}`);
+        console.log(`[ASR] ❌ Canceled: ${e.reason}`);
+        console.log(`[ASR] ❌ Error details: ${e.errorDetails}`);
+        azureBadge.className = 'badge err';
+        azureBadge.textContent = 'Azure: error';
+        
+        // Auto-restart on certain errors
+        if (e.reason === SpeechSDK.CancellationReason.Error) {
+          console.log(`[ASR] 🔄 Auto-restarting after error...`);
+          setTimeout(() => {
+            if (reco) {
+              reco.startContinuousRecognitionAsync();
+            }
+          }, 1000);
+        }
+      };
+      
+      reco.sessionStarted = () => {
+        append('(session started)');
+        azureBadge.className = 'badge ok';
+        azureBadge.textContent = 'Azure: active';
+        micBadge.className = 'badge ok';
+        micBadge.textContent = 'Mic: recording';
+      };
+      
+      reco.sessionStopped = () => {
+        append('(session stopped)');
+        azureBadge.className = 'badge warn';
+        azureBadge.textContent = 'Azure: stopped';
+        micBadge.className = 'badge warn';
+        micBadge.textContent = 'Mic: off';
+      };
+
+      // Initialize phrase editor view for current language before starting
+      loadPhraseEditorFor(sourceLang.value);
+      reco.startContinuousRecognitionAsync();
+    };
+
+    stopBtn.onclick = () => {
+      stopBtn.disabled = true; 
+      startBtn.disabled = false;
+      
+      if (state.stabilityTimer) {
+        clearTimeout(state.stabilityTimer);
+        state.stabilityTimer = null;
+      }
+      
+      if (reco) {
+        reco.stopContinuousRecognitionAsync(
+          () => { 
+            reco.close(); 
+            reco = null;
+            azureBadge.className = 'badge';
+            azureBadge.textContent = 'Azure: idle';
+            micBadge.className = 'badge';
+            micBadge.textContent = 'Mic: off';
+          }, 
+          () => { 
+            reco.close(); 
+            reco = null;
+            azureBadge.className = 'badge';
+            azureBadge.textContent = 'Azure: idle';
+            micBadge.className = 'badge';
+            micBadge.textContent = 'Mic: off';
+          }
+        );
+      }
+    };
+
+    // Initial load of phrase editor for default source language
+    loadPhraseEditorFor(sourceLang.value);
+  </script>
+</body>
+</html>
